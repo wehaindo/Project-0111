@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- Load CSS Assets -->
+        <template id="assets_css" inherit_id="point_of_sale.assets">
+            <xpath expr="." position="inside">
+                <link rel="stylesheet" href="/weha_pos_self_sync/static/src/css/pos_sync.css"/>
+            </xpath>
+        </template>
+
+        <!-- Load JavaScript Assets -->
+        <template id="assets" inherit_id="point_of_sale.assets">
+            <xpath expr="." position="inside">
+                <!-- Load in correct order -->
+                <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/db_extended.js"/>
+                <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/sync_service.js"/>
+                <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/models_extended.js"/>
+                <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/order_sync.js"/>
+                <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/pos_patch.js"/>
+            </xpath>
+        </template>
+
+    </data>
+</odoo>
