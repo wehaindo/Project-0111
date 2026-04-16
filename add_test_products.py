@@ -6,6 +6,7 @@ Script to add 30,000 test products to Odoo via XML-RPC
 
 import xmlrpc.client
 import time
+import random
 
 # Odoo connection parameters - UPDATE THESE!
 URL = 'http://localhost:8069'
@@ -107,8 +108,8 @@ def main():
             products_batch.append({
                 'name': f'Test Product {product_num:05d}',
                 'default_code': f'TEST{product_num:05d}',
-                'barcode': f'TEST{product_num:05d}',
-                'type': 'consu',
+                'barcode': f'{random.randint(1000000000000, 9999999999999)}',
+                'type': 'product',
                 'categ_id': categ_id,
                 'pos_categ_id': pos_categ_id,
                 'list_price': 10.0 + (product_num % 100),

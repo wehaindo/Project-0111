@@ -12,6 +12,17 @@ class PosConfig(models.Model):
         default=True,
         help='Enable offline-first hybrid sync for this POS'
     )
+    sync_method = fields.Selection([
+        ('normal', 'Normal POS'),
+        ('lazy', 'Lazy Load'),
+        ('hybrid', 'Hybrid'),
+    ],
+        string='Sync Method',
+        default='lazy',
+        help='Normal: Load all products at startup (standard Odoo)\n'
+             'Lazy: Load products only when searched/scanned (best for 10k+ products)\n'
+             'Hybrid: Load initial batch + on-demand'
+    )
     sync_interval = fields.Integer(
         string='Sync Interval (seconds)',
         default=10,
@@ -25,12 +36,14 @@ class PosConfig(models.Model):
     lazy_load_products = fields.Boolean(
         string='Lazy Load Products',
         default=True,
-        help='Load products on-demand instead of all at startup'
+        help='Deprecated: Use Sync Method instead',
+        compute='_compute_lazy_load',
+        store=False
     )
     initial_product_limit = fields.Integer(
         string='Initial Product Load',
         default=100,
-        help='Number of products to load initially'
+        help='Number of products to load initially (only for Hybrid mode)'
     )
     enable_auto_save = fields.Boolean(
         string='Auto-save Orders',
@@ -42,6 +55,12 @@ class PosConfig(models.Model):
         default=True,
         help='Only sync changed data instead of full reload'
     )
+    
+    @api.depends('sync_method')
+    def _compute_lazy_load(self):
+        """Backward compatibility for lazy_load_products field"""
+        for record in self:
+            record.lazy_load_products = record.sync_method in ('lazy', 'hybrid')
     
     @api.constrains('sync_interval')
     def _check_sync_interval(self):

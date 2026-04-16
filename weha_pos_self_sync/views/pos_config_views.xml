@@ -54,16 +54,25 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-12 col-lg-6 o_setting_box">
+                        <div class="col-12 col-lg-6 o_setting_box" attrs="{'invisible': [('enable_hybrid_sync', '=', False)]}">
                             <div class="o_setting_left_pane">
-                                <field name="lazy_load_products"/>
                             </div>
                             <div class="o_setting_right_pane">
-                                <label for="lazy_load_products" string="Lazy Load Products"/>
+                                <label for="sync_method" string="Sync Method"/>
                                 <div class="text-muted">
-                                    Load products on demand for better performance
+                                    Choose how products are loaded
                                 </div>
-                                <div class="content-group mt16" attrs="{'invisible': [('lazy_load_products', '=', False)]}">
+                                <div class="content-group mt16">
+                                    <div class="row">
+                                        <field name="sync_method" class="o_light_label" widget="radio"/>
+                                    </div>
+                                    <div class="text-muted mt8">
+                                        <strong>Normal POS:</strong> Load all products at startup (standard Odoo)<br/>
+                                        <strong>Lazy Load:</strong> Zero initial load, products load only when searched/scanned (best for 10k+ products)<br/>
+                                        <strong>Hybrid:</strong> Load initial batch + on-demand loading
+                                    </div>
+                                </div>
+                                <div class="content-group mt16" attrs="{'invisible': [('sync_method', '!=', 'hybrid')]}">
                                     <div class="row">
                                         <label string="Initial Product Limit" for="initial_product_limit" class="col-lg-4 o_light_label"/>
                                         <field name="initial_product_limit"/>

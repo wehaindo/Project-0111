@@ -13,12 +13,18 @@ const _super_posmodel = models.PosModel.prototype;
 
 models.PosModel = models.PosModel.extend({
     /**
-     * Override to implement lazy loading
+     * Override to implement 3 loading modes:
+     * - normal: Standard Odoo (load all products)
+     * - lazy: Zero initial load (products load on search/scan only)
+     * - hybrid: Load initial batch + on-demand
      */
     async load_server_data() {
         const self = this;
         
-        // First call parent to load config and essential data
+        // Check mode BEFORE calling parent to prevent product loading
+        // We need to check config early, but config is loaded in parent
+        // So we'll temporarily call parent, check mode, then clear products if needed
+        
         await _super_posmodel.load_server_data.call(this);
         
         // Initialize IndexedDB after config is loaded
@@ -26,15 +32,78 @@ models.PosModel = models.PosModel.extend({
             await this.db.init_indexed_db();
         }
 
-        // Check if lazy loading is enabled (config is now loaded)
-        if (this.config && this.config.lazy_load_products) {
-            console.log('Lazy loading enabled - loading from cache');
+        // Determine loading mode
+        const sync_method = (this.config && this.config.sync_method) || 'normal';
+        const hybrid_sync_enabled = this.config && this.config.enable_hybrid_sync;
+        
+        console.log(`📦 Loading mode: ${sync_method} (Hybrid Sync: ${hybrid_sync_enabled})`);
+
+        if (!hybrid_sync_enabled || sync_method === 'normal') {
+            // MODE 1: Normal POS - use standard Odoo loading (already loaded by parent)
+            console.log('✓ Using standard Odoo product loading');
             
-            // Load products from IndexedDB cache
-            await this._load_products_from_cache();
+            // Ensure all products are proper model instances
+            var products_list = [];
+            for (var id in this.db.product_by_id) {
+                var product = this.db.product_by_id[id];
+                // Check if product has the get_price method (is a proper Product instance)
+                if (product && typeof product.get_price !== 'function') {
+                    // Re-instantiate as proper Product model
+                    product.pos = this;
+                    var product_model = new models.Product({}, product);
+                    products_list.push(product_model);
+                }
+            }
             
-            // Load partners from IndexedDB cache
+            // Re-add products as proper instances if needed
+            if (products_list.length > 0) {
+                console.log(`🔧 Re-instantiating ${products_list.length} products as proper models`);
+                this.db.add_products(products_list);
+            }
+            
+            return true;
+        }
+        
+        if (sync_method === 'lazy') {
+            // MODE 2: Lazy Load - ZERO products at startup
+            console.log('🚀 Lazy Load Mode: Clearing pre-loaded products...');
+            
+            // Clear products that were loaded by parent
+            this.db.product_by_id = {};
+            this.db.product_by_barcode = {};
+            this.db.product_by_category_id = {};
+            if (this.db.product_search_string) {
+                this.db.product_search_string = {};
+            }
+            
+            console.log('✓ Products cleared - will load on-demand only');
+            
+            // Keep partners
             await this._load_partners_from_cache();
+            
+            return true;
+        }
+        
+        if (sync_method === 'hybrid') {
+            // MODE 3: Hybrid - Load initial batch
+            const limit = (this.config && this.config.initial_product_limit) || 100;
+            console.log(`🔄 Hybrid Mode: Replacing full load with ${limit} initial products`);
+            
+            // Clear all products first
+            this.db.product_by_id = {};
+            this.db.product_by_barcode = {};
+            this.db.product_by_category_id = {};
+            if (this.db.product_search_string) {
+                this.db.product_search_string = {};
+            }
+            
+            // Load limited products from cache or server
+            await this._load_products_from_cache(limit);
+            
+            // Load partners
+            await this._load_partners_from_cache();
+            
+            return true;
         }
 
         return true;
@@ -43,14 +112,15 @@ models.PosModel = models.PosModel.extend({
     /**
      * Load products from IndexedDB cache
      */
-    _load_products_from_cache: async function() {
+    _load_products_from_cache: async function(limit) {
         var self = this;
+        limit = limit || 100;
+        
         try {
-            const limit = (this.config && this.config.initial_product_limit) || 100;
             const cached_products = await this.db.get_products_from_indexeddb(null, limit);
             
             if (cached_products && cached_products.length > 0) {
-                console.log(`Loaded ${cached_products.length} products from cache`);
+                console.log(`✓ Loaded ${cached_products.length} products from IndexedDB`);
                 
                 // Convert to Product model instances
                 var using_company_currency = this.config.currency_id[0] === this.company.currency_id[0];
@@ -60,9 +130,16 @@ models.PosModel = models.PosModel.extend({
                     if (!using_company_currency) {
                         product.lst_price = Math.round(product.lst_price * conversion_rate * Math.pow(10, 2)) / Math.pow(10, 2);
                     }
-                    if (product.categ_id && product.categ_id[0]) {
-                        product.categ = _.findWhere(self.product_categories, {'id': product.categ_id[0]});
+                    // Try to find category from pos_categ_id first, then categ_id
+                    var categ = null;
+                    if (product.pos_categ_id && product.pos_categ_id[0]) {
+                        categ = _.findWhere(self.pos_categ, {'id': product.pos_categ_id[0]});
                     }
+                    if (!categ && product.categ_id && product.categ_id[0]) {
+                        categ = _.findWhere(self.product_categories, {'id': product.categ_id[0]});
+                    }
+                    // Fallback to uncategorized if no category found
+                    product.categ = categ || { id: 0, name: 'Uncategorized' };
                     product.pos = self;
                     return new models.Product({}, product);
                 });
@@ -70,13 +147,13 @@ models.PosModel = models.PosModel.extend({
                 this.db.add_products(product_models);
             } else {
                 // No cache, load initial batch from server
-                console.log('No product cache, loading from server...');
+                console.log('⚠ No product cache, loading from server...');
                 await this._load_initial_products_from_server(limit);
             }
         } catch (error) {
             console.error('Error loading products from cache:', error);
             // Fallback to server load
-            await this._load_initial_products_from_server(100);
+            await this._load_initial_products_from_server(limit);
         }
     },
 
@@ -119,7 +196,16 @@ models.PosModel = models.PosModel.extend({
                     if (!using_company_currency) {
                         product.lst_price = Math.round(product.lst_price * conversion_rate * Math.pow(10, 2)) / Math.pow(10, 2);
                     }
-                    product.categ = _.findWhere(self.product_categories, {'id': product.categ_id[0]});
+                    // Try to find category from pos_categ_id first, then categ_id
+                    var categ = null;
+                    if (product.pos_categ_id && product.pos_categ_id[0]) {
+                        categ = _.findWhere(self.pos_categ, {'id': product.pos_categ_id[0]});
+                    }
+                    if (!categ && product.categ_id && product.categ_id[0]) {
+                        categ = _.findWhere(self.product_categories, {'id': product.categ_id[0]});
+                    }
+                    // Fallback to uncategorized if no category found
+                    product.categ = categ || { id: 0, name: 'Uncategorized' };
                     product.pos = self;
                     return new models.Product({}, product);
                 });
@@ -210,17 +296,47 @@ models.PosModel = models.PosModel.extend({
             if (products && products.length > 0) {
                 console.log(`Loaded ${products.length} products for category ${category_id}`);
                 
+                // Convert to Product model instances
+                var using_company_currency = this.config.currency_id[0] === this.company.currency_id[0];
+                var conversion_rate = this.currency.rate / this.company_currency.rate;
+                var self = this;
+                
+                var product_models = _.map(products, function (product) {
+                    // Skip if already a Product model instance
+                    if (product instanceof models.Product) {
+                        return product;
+                    }
+                    
+                    if (!using_company_currency) {
+                        product.lst_price = Math.round(product.lst_price * conversion_rate * Math.pow(10, 2)) / Math.pow(10, 2);
+                    }
+                    // Try to find category from pos_categ_id first, then categ_id
+                    var categ = null;
+                    if (product.pos_categ_id && product.pos_categ_id[0]) {
+                        categ = _.findWhere(self.pos_categ, {'id': product.pos_categ_id[0]});
+                    }
+                    if (!categ && product.categ_id && product.categ_id[0]) {
+                        categ = _.findWhere(self.product_categories, {'id': product.categ_id[0]});
+                    }
+                    // Fallback to uncategorized if no category found
+                    product.categ = categ || { id: 0, name: 'Uncategorized' };
+                    product.pos = self;
+                    return new models.Product({}, product);
+                });
+                
                 // Add to POS DB
-                this.db.add_products(products);
+                this.db.add_products(product_models);
                 
                 // Cache to IndexedDB
                 await this.db.save_products_to_indexeddb(products);
                 
                 // Trigger UI update
-                this.trigger('products-loaded', { category_id, count: products.length });
+                this.trigger('products-loaded', { category_id, count: product_models.length });
+                
+                return product_models;
             }
 
-            return products;
+            return [];
 
         } catch (error) {
             console.error('Error loading products by category:', error);
@@ -229,37 +345,226 @@ models.PosModel = models.PosModel.extend({
     },
 
     /**
-     * Search products (lazy loading)
+     * Search products (on-demand loading for lazy/hybrid modes)
      */
     search_products_server: async function(query) {
         try {
-            console.log('Searching products:', query);
+            console.log('🔍 Searching products:', query);
 
-            const products = await rpc.query({
-                route: '/pos/search_products',
-                params: {
-                    query: query,
-                    session_id: this.pos_session.id,
-                    limit: 50
+            // First check IndexedDB cache
+            let products = [];
+            let from_cache = false;
+            try {
+                products = await this.db.search_products_in_indexeddb(query, 50);
+                if (products && products.length > 0) {
+                    console.log(`✓ Found ${products.length} products in IndexedDB cache`);
+                    from_cache = true;
+                } else {
+                    console.log('⚠ No products found in IndexedDB cache');
                 }
-            });
-
-            if (products && products.length > 0) {
-                console.log(`Found ${products.length} products for query: ${query}`);
-                
-                // Add to POS DB
-                this.db.add_products(products);
-                
-                // Cache to IndexedDB
-                await this.db.save_products_to_indexeddb(products);
+            } catch (e) {
+                console.log('IndexedDB search failed, will search server:', e);
             }
 
-            return products;
+            // If not found in cache, search server
+            if (!products || products.length === 0) {
+                console.log('🌐 Searching server for:', query);
+                
+                try {
+                    // Try custom route first
+                    products = await rpc.query({
+                        route: '/pos/search_products',
+                        params: {
+                            query: query,
+                            session_id: this.pos_session.id,
+                            limit: 50
+                        }
+                    });
+                    console.log('✓ Server returned', products ? products.length : 0, 'products');
+                } catch (route_error) {
+                    console.warn('Custom route failed, using standard search:', route_error);
+                    
+                    // Fallback to standard RPC search
+                    products = await rpc.query({
+                        model: 'product.product',
+                        method: 'search_read',
+                        args: [[
+                            '|', '|', '|',
+                            ['name', 'ilike', query],
+                            ['display_name', 'ilike', query],
+                            ['barcode', '=', query],
+                            ['default_code', 'ilike', query],
+                            ['available_in_pos', '=', true]
+                        ], [
+                            'id', 'name', 'display_name', 'lst_price', 'standard_price',
+                            'categ_id', 'pos_categ_id', 'taxes_id', 'barcode',
+                            'default_code', 'to_weight', 'uom_id', 'description_sale',
+                            'description', 'product_tmpl_id', 'tracking', 'write_date'
+                        ]],
+                        kwargs: { limit: 50 }
+                    });
+                    console.log('✓ Standard search returned', products ? products.length : 0, 'products');
+                }
+            }
+
+            if (products && products.length > 0) {
+                console.log(`✓ Processing ${products.length} products for query: ${query}`);
+                
+                // Convert to Product model instances (both from cache and server)
+                var using_company_currency = this.config.currency_id[0] === this.company.currency_id[0];
+                var conversion_rate = this.currency.rate / this.company_currency.rate;
+                var self = this;
+                
+                var product_models = _.map(products, function (product) {
+                    // Skip if already a Product model instance
+                    if (product instanceof models.Product) {
+                        return product;
+                    }
+                    
+                    if (!using_company_currency) {
+                        product.lst_price = Math.round(product.lst_price * conversion_rate * Math.pow(10, 2)) / Math.pow(10, 2);
+                    }
+                    // Try to find category from pos_categ_id first, then categ_id
+                    var categ = null;
+                    if (product.pos_categ_id && product.pos_categ_id[0]) {
+                        categ = _.findWhere(self.pos_categ, {'id': product.pos_categ_id[0]});
+                    }
+                    if (!categ && product.categ_id && product.categ_id[0]) {
+                        categ = _.findWhere(self.product_categories, {'id': product.categ_id[0]});
+                    }
+                    // Fallback to uncategorized if no category found
+                    product.categ = categ || { id: 0, name: 'Uncategorized' };
+                    product.pos = self;
+                    return new models.Product({}, product);
+                });
+                
+                // Add to POS DB
+                this.db.add_products(product_models);
+                
+                // Cache to IndexedDB (only if from server)
+                if (!from_cache) {
+                    await this.db.save_products_to_indexeddb(products);
+                }
+                
+                return product_models;
+            }
+
+            return [];
 
         } catch (error) {
             console.error('Error searching products:', error);
             return [];
         }
+    },
+    
+    /**
+     * Get product by barcode (on-demand for lazy mode)
+     */
+    get_product_by_barcode: async function(barcode) {
+        var self = this;
+        
+        // Try local memory DB first
+        var product = this.db.get_product_by_barcode(barcode);
+        if (product) {
+            return product;
+        }
+        
+        // If lazy/hybrid mode and not found locally, check IndexedDB then server
+        const sync_method = (this.config && this.config.sync_method) || 'normal';
+        
+        if (sync_method === 'lazy' || sync_method === 'hybrid') {
+            console.log(`🔍 Product ${barcode} not in memory, checking IndexedDB...`);
+            
+            // Try IndexedDB first
+            try {
+                const cached_product = await this.db.get_product_by_barcode_from_indexeddb(barcode);
+                if (cached_product) {
+                    console.log(`✓ Product found in IndexedDB: ${cached_product.display_name}`);
+                    
+                    // Convert to Product model and add to memory
+                    var using_company_currency = this.config.currency_id[0] === this.company.currency_id[0];
+                    var conversion_rate = this.currency.rate / this.company_currency.rate;
+                    
+                    if (!using_company_currency) {
+                        cached_product.lst_price = Math.round(cached_product.lst_price * conversion_rate * Math.pow(10, 2)) / Math.pow(10, 2);
+                    }
+                    var categ = null;
+                    if (cached_product.pos_categ_id && cached_product.pos_categ_id[0]) {
+                        categ = _.findWhere(this.pos_categ, {'id': cached_product.pos_categ_id[0]});
+                    }
+                    if (!categ && cached_product.categ_id && cached_product.categ_id[0]) {
+                        categ = _.findWhere(this.product_categories, {'id': cached_product.categ_id[0]});
+                    }
+                    cached_product.categ = categ || { id: 0, name: 'Uncategorized' };
+                    cached_product.pos = this;
+                    
+                    var product_model = new models.Product({}, cached_product);
+                    this.db.add_products([product_model]);
+                    
+                    return product_model;
+                }
+            } catch (e) {
+                console.log('IndexedDB lookup failed:', e);
+            }
+            
+            console.log(`🌐 Product not in IndexedDB, searching server...`);
+            
+            try {
+                const products = await rpc.query({
+                    model: 'product.product',
+                    method: 'search_read',
+                    args: [[
+                        ['barcode', '=', barcode],
+                        ['available_in_pos', '=', true]
+                    ], [
+                        'id', 'name', 'display_name', 'lst_price', 'standard_price',
+                        'categ_id', 'pos_categ_id', 'taxes_id', 'barcode',
+                        'default_code', 'to_weight', 'uom_id', 'description_sale',
+                        'description', 'product_tmpl_id', 'tracking', 'write_date'
+                    ]],
+                    kwargs: { limit: 1 }
+                });
+                
+                if (products && products.length > 0) {
+                    var product_data = products[0];
+                    
+                    console.log(`✓ Product found on server: ${product_data.display_name}`);
+                    
+                    // Convert to Product model
+                    var using_company_currency = this.config.currency_id[0] === this.company.currency_id[0];
+                    var conversion_rate = this.currency.rate / this.company_currency.rate;
+                    
+                    if (!using_company_currency) {
+                        product_data.lst_price = Math.round(product_data.lst_price * conversion_rate * Math.pow(10, 2)) / Math.pow(10, 2);
+                    }
+                    // Try to find category from pos_categ_id first, then categ_id
+                    var categ = null;
+                    if (product_data.pos_categ_id && product_data.pos_categ_id[0]) {
+                        categ = _.findWhere(this.pos_categ, {'id': product_data.pos_categ_id[0]});
+                    }
+                    if (!categ && product_data.categ_id && product_data.categ_id[0]) {
+                        categ = _.findWhere(this.product_categories, {'id': product_data.categ_id[0]});
+                    }
+                    // Fallback to uncategorized if no category found
+                    product_data.categ = categ || { id: 0, name: 'Uncategorized' };
+                    product_data.pos = this;
+                    
+                    var product_model = new models.Product({}, product_data);
+                    
+                    // Add to local cache
+                    this.db.add_products([product_model]);
+                    
+                    // Save to IndexedDB
+                    await this.db.save_products_to_indexeddb([product_data]);
+                    
+                    return product_model;
+                }
+            } catch (error) {
+                console.error('Error fetching product from server:', error);
+            }
+        }
+        
+        return undefined;
     },
 });
 

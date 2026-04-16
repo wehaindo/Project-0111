@@ -158,12 +158,124 @@ models.PosModel = models.PosModel.extend({
     },
 });
 
-// Extend ProductScreen for lazy loading
+// Patch ProductListWidget to handle undefined products/pricelists in lazy mode
+if (screens.ProductListWidget) {
+    screens.ProductListWidget.include({
+        /**
+         * Override calculate_cache_key to handle undefined products/pricelists
+         */
+        calculate_cache_key: function(product, pricelist) {
+            if (!product || !pricelist) {
+                return '0,0';
+            }
+            return product.id + ',' + pricelist.id;
+        },
+        
+        /**
+         * Override _get_active_pricelist to ensure it always returns a valid pricelist
+         */
+        _get_active_pricelist: function() {
+            var current_order = this.pos.get_order();
+            var current_pricelist = this.pos.default_pricelist;
+            if (current_order && current_order.pricelist) {
+                current_pricelist = current_order.pricelist;
+            }
+            // Ensure we always return a valid pricelist, never undefined
+            return current_pricelist || this.pos.default_pricelist || { id: 0, name: 'Default' };
+        },
+        
+        /**
+         * Override get_product_image_url to handle undefined products
+         */
+        get_product_image_url: function(product) {
+            if (!product || !product.id) {
+                return window.location.origin + '/web/image?model=product.product&field=image_128&id=0';
+            }
+            return window.location.origin + '/web/image?model=product.product&field=image_128&id=' + product.id;
+        },
+        
+        /**
+         * Override render_product to validate product before rendering
+         */
+        render_product: function(product) {
+            // Skip invalid products
+            if (!product || !product.id) {
+                console.warn('Skipping invalid product:', product);
+                return document.createDocumentFragment();
+            }
+            return this._super(product);
+        },
+        
+        /**
+         * Override set_product_list to filter out invalid products
+         */
+        set_product_list: function(product_list, search_word) {
+            // Filter out invalid products
+            var valid_products = (product_list || []).filter(function(product) {
+                return product && product.id;
+            });
+            
+            if (valid_products.length !== (product_list || []).length) {
+                console.warn('Filtered out', (product_list || []).length - valid_products.length, 'invalid products');
+            }
+            
+            this.product_list = valid_products;
+            this.search_word = !!search_word ? search_word : false;
+            this.renderElement();
+        },
+    });
+}
+
+// Also patch ProductsWidget if it exists (for compatibility)
+if (screens.ProductsWidget) {
+    screens.ProductsWidget.include({
+        calculate_cache_key: function(product, pricelist) {
+            if (!product || !pricelist) {
+                return '0,0';
+            }
+            return product.id + ',' + pricelist.id;
+        },
+        _get_active_pricelist: function() {
+            var current_order = this.pos.get_order();
+            var current_pricelist = this.pos.default_pricelist;
+            if (current_order && current_order.pricelist) {
+                current_pricelist = current_order.pricelist;
+            }
+            // Ensure we always return a valid pricelist, never undefined
+            return current_pricelist || this.pos.default_pricelist || { id: 0, name: 'Default' };
+        },
+        get_product_image_url: function(product) {
+            if (!product || !product.id) {
+                return window.location.origin + '/web/image?model=product.product&field=image_128&id=0';
+            }
+            return window.location.origin + '/web/image?model=product.product&field=image_128&id=' + product.id;
+        },
+        render_product: function(product) {
+            if (!product || !product.id) {
+                console.warn('Skipping invalid product:', product);
+                return document.createDocumentFragment();
+            }
+            return this._super(product);
+        },
+        set_product_list: function(product_list, search_word) {
+            var valid_products = (product_list || []).filter(function(product) {
+                return product && product.id;
+            });
+            if (valid_products.length !== (product_list || []).length) {
+                console.warn('Filtered out', (product_list || []).length - valid_products.length, 'invalid products');
+            }
+            this.product_list = valid_products;
+            this.search_word = !!search_word ? search_word : false;
+            this.renderElement();
+        },
+    });
+}
+// Extend ProductScreen for on-demand product loading
 const ProductScreenWidget = screens.ProductScreenWidget;
 
 ProductScreenWidget.include({
     /**
-     * Override category click to lazy load products
+     * Override category click to load products on-demand
      */
     click_product_category: async function(category) {
         const self = this;
@@ -171,10 +283,14 @@ ProductScreenWidget.include({
         // Call parent
         this._super(category);
 
-        // Lazy load products if enabled
-        if (this.pos.config.lazy_load_products) {
+        // Check if we should lazy load
+        const sync_method = this.pos.config && this.pos.config.sync_method;
+        
+        if (sync_method === 'lazy' || sync_method === 'hybrid') {
             try {
                 const category_id = category ? category.id : null;
+                
+                console.log(`📦 Loading products for category: ${category_id}`);
                 
                 // Load products for this category
                 await this.pos.load_products_by_category(category_id);
@@ -197,13 +313,18 @@ ProductScreenWidget.include({
         // Try local search first
         this._super(category, query, buy_result);
 
-        // If lazy loading enabled and query provided
-        if (this.pos.config.lazy_load_products && query && query.length >= 3) {
+        // Check if we should search server
+        const sync_method = this.pos.config && this.pos.config.sync_method;
+        
+        if ((sync_method === 'lazy' || sync_method === 'hybrid') && query && query.length >= 3) {
             try {
+                console.log(`🔍 Searching server for: "${query}"`);
+                
                 // Search server for additional products
                 const products = await this.pos.search_products_server(query);
                 
                 if (products && products.length > 0) {
+                    console.log(`✓ Found ${products.length} products, refreshing UI`);
                     // Refresh product list to show new products
                     this.product_list_widget.renderElement();
                 }
@@ -212,6 +333,29 @@ ProductScreenWidget.include({
                 console.error('Error searching products:', error);
             }
         }
+    },
+    
+    /**
+     * Override barcode scan to support on-demand loading
+     */
+    barcode_product_action: async function(code) {
+        const sync_method = this.pos.config && this.pos.config.sync_method;
+        
+        if (sync_method === 'lazy' || sync_method === 'hybrid') {
+            // Try to get product from cache or server
+            console.log(`🔍 Scanning barcode: ${code.base_code}`);
+            
+            var product = await this.pos.get_product_by_barcode(code.base_code);
+            
+            if (product) {
+                console.log(`✓ Product found: ${product.display_name}`);
+                // Refresh UI to show the product
+                this.product_list_widget.renderElement();
+            }
+        }
+        
+        // Call parent to handle the barcode
+        return this._super(code);
     },
 });
 
@@ -368,39 +512,20 @@ const PaymentScreenWidget = screens.PaymentScreenWidget;
 
 PaymentScreenWidget.include({
     /**
-     * Override validate order to use queue
+     * Override validate order to use standard Odoo flow
+     * Order sync is handled in push_order override in order_sync.js
      */
     validate_order: async function(force_validation) {
-        const self = this;
         const order = this.pos.get_order();
 
-        // If hybrid sync enabled
-        if (this.pos && this.pos.config && this.pos.config.enable_hybrid_sync) {
-            // Validate order data
-            if (!order.get_orderlines().length) {
-                console.log('Empty order');
-                return;
-            }
-
-            // Check if fully paid
-            if (order.is_paid_with_cash() || order.get_due() === 0 || force_validation) {
-                try {
-                    // Add to sync queue
-                    await order.add_to_sync_queue();
-                    
-                    // Show success
-                    this.show_receipt();
-
-                } catch (error) {
-                    console.error('Error queuing order:', error);
-                }
-            } else {
-                console.log('Order not fully paid');
-            }
-        } else {
-            // Standard validation
-            return this._super(force_validation);
+        // Validate order data
+        if (!order || !order.get_orderlines().length) {
+            console.log('Empty order');
+            return;
         }
+
+        // Use standard validation - push_order will handle sync
+        return this._super(force_validation);
     },
 });
 

@@ -230,7 +230,15 @@ const SyncService = Class.extend({
 
         } catch (error) {
             console.error('Sync error:', error);
-            await this.db.add_sync_log('error', 'Sync failed', { error: error.message });
+            
+            // Sanitize error for IndexedDB storage
+            const error_info = {
+                message: error.message || String(error),
+                code: error.code,
+                name: error.name
+            };
+            
+            await this.db.add_sync_log('error', 'Sync failed', error_info);
             this.trigger('sync-error', { error: error });
         } finally {
             this.is_syncing = false;
@@ -270,8 +278,9 @@ const SyncService = Class.extend({
                     await this.db.update_order_status(order.uuid, 'synced');
                     synced++;
                     
-                    // Optionally delete synced orders after some time
+                    // Keep synced orders in IndexedDB for audit/history
                     // await this.db.delete_synced_order(order.uuid);
+                    console.log(`✓ Order ${order.uuid} synced and kept in IndexedDB`);
                 } else {
                     await this.db.update_order_status(order.uuid, 'failed', result.error);
                     failed++;
@@ -361,6 +370,12 @@ const SyncService = Class.extend({
         try {
             console.log('=== Starting Delta Sync ===');
 
+            // Check if delta sync is enabled
+            if (!this.pos.config.enable_delta_sync) {
+                console.log('Delta sync is disabled');
+                return true;
+            }
+
             // Get last sync timestamp
             const last_sync = await this.db.get_sync_metadata('last_delta_sync');
             console.log('Last delta sync timestamp:', last_sync);
@@ -432,7 +447,15 @@ const SyncService = Class.extend({
 
         } catch (error) {
             console.error('Delta sync error:', error);
-            await this.db.add_sync_log('error', 'Delta sync failed', { error: error.message });
+            
+            // Sanitize error for IndexedDB storage
+            const error_info = {
+                message: error.message || String(error),
+                code: error.code,
+                name: error.name
+            };
+            
+            await this.db.add_sync_log('error', 'Delta sync failed', error_info);
             return false;
         }
     },
@@ -491,9 +514,15 @@ const SyncService = Class.extend({
     },
 
     /**
-     * Clear old synced orders (cleanup)
+     * Clear old synced orders (cleanup) - DISABLED
+     * Orders are kept permanently in IndexedDB for audit/history
      */
     cleanup_old_orders: async function(days = 7) {
+        console.log('Order cleanup disabled - all orders kept in IndexedDB for audit purposes');
+        return;
+        
+        // Original cleanup code disabled below:
+        /*
         const cutoff_date = new Date();
         cutoff_date.setDate(cutoff_date.getDate() - days);
 
@@ -517,6 +546,7 @@ const SyncService = Class.extend({
 
             console.log(`Cleaned up ${deleted} old synced orders`);
         };
+        */
     },
 });
 

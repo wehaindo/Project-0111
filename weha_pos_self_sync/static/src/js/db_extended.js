@@ -153,6 +153,69 @@ PosDB.include({
     },
 
     /**
+     * Search products in IndexedDB by query string
+     */
+    search_products_in_indexeddb: async function(query, limit = 50) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['products_cache'], 'readonly');
+            const store = transaction.objectStore('products_cache');
+            const request = store.getAll();
+
+            request.onsuccess = (event) => {
+                const all_products = event.target.result;
+                const search_query = query.toLowerCase();
+                
+                // Filter products by name, barcode, or default_code
+                const matched_products = all_products.filter(product => {
+                    return (product.name && product.name.toLowerCase().includes(search_query)) ||
+                           (product.display_name && product.display_name.toLowerCase().includes(search_query)) ||
+                           (product.barcode && product.barcode.toLowerCase().includes(search_query)) ||
+                           (product.default_code && product.default_code.toLowerCase().includes(search_query));
+                });
+                
+                // Limit results
+                const limited_results = limit ? matched_products.slice(0, limit) : matched_products;
+                resolve(limited_results);
+            };
+
+            request.onerror = (event) => {
+                console.error('Error searching products in IndexedDB:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Get product by barcode from IndexedDB
+     */
+    get_product_by_barcode_from_indexeddb: async function(barcode) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['products_cache'], 'readonly');
+            const store = transaction.objectStore('products_cache');
+            const request = store.getAll();
+
+            request.onsuccess = (event) => {
+                const all_products = event.target.result;
+                const product = all_products.find(p => p.barcode === barcode);
+                resolve(product || null);
+            };
+
+            request.onerror = (event) => {
+                console.error('Error getting product by barcode from IndexedDB:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
      * Save partners to IndexedDB
      */
     save_partners_to_indexeddb: async function(partners) {
@@ -243,6 +306,30 @@ PosDB.include({
     },
 
     /**
+     * Get single order from queue by UUID
+     */
+    get_order_from_queue: async function(uuid) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['orders_queue'], 'readonly');
+            const store = transaction.objectStore('orders_queue');
+            const request = store.get(uuid);
+
+            request.onsuccess = (event) => {
+                resolve(event.target.result);
+            };
+
+            request.onerror = (event) => {
+                console.error('Error getting order from queue:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
      * Get pending orders from queue
      */
     get_pending_orders: async function() {
@@ -253,11 +340,16 @@ PosDB.include({
         return new Promise((resolve, reject) => {
             const transaction = this.indexedDB.transaction(['orders_queue'], 'readonly');
             const store = transaction.objectStore('orders_queue');
-            const index = store.index('sync_status');
-            const request = index.getAll('pending_sync');
+            const request = store.getAll();
 
             request.onsuccess = (event) => {
-                resolve(event.target.result);
+                const all_orders = event.target.result;
+                // Include both pending_sync and failed orders
+                const pending_orders = all_orders.filter(order => 
+                    order.sync_status === 'pending_sync' || order.sync_status === 'failed'
+                );
+                console.log(`Found ${pending_orders.length} orders to sync (pending + failed)`);
+                resolve(pending_orders);
             };
 
             request.onerror = (event) => {
@@ -348,10 +440,22 @@ PosDB.include({
             const transaction = this.indexedDB.transaction(['sync_logs'], 'readwrite');
             const store = transaction.objectStore('sync_logs');
 
+            // Sanitize data to prevent DataCloneError
+            let sanitized_data = null;
+            if (data !== null && data !== undefined) {
+                try {
+                    // Convert to plain object by JSON serialization
+                    sanitized_data = JSON.parse(JSON.stringify(data));
+                } catch (e) {
+                    // If serialization fails, just store as string
+                    sanitized_data = { error: String(data) };
+                }
+            }
+
             const log = {
                 type: type,
                 message: message,
-                data: data,
+                data: sanitized_data,
                 timestamp: new Date().toISOString()
             };
 
