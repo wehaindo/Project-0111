@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<odoo>
+    <template id="assets" inherit_id="point_of_sale.assets">
+        <xpath expr="." position="inside">            
+            <script type="text/javascript" src="/weha_smart_pos_product/static/src/js/jquery.simplePagination.js" />            
+            <script type="text/javascript" src="/weha_smart_pos_product/static/src/js/screen_product_list.js"/>
+            <link type="text/css" rel="stylesheet" href="/weha_smart_pos_product/static/src/css/simplePagination.css" />
+            <link type="text/css" rel="stylesheet" href="/weha_smart_pos_product/static/src/css/styles.css" />
+        </xpath>
+    </template>
+</odoo>

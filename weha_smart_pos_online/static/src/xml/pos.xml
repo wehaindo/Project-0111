@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <t t-name="NetworkStatusButton">
+        <div class="oe_status networkstatusbuttton">
+            <div class="js_connected oe_icon">
+                <span class="icon-and-badge">
+                  <i aria-label="Network Status" role="img" title="Network Status" class="fa fa-fw fa-check-square"></i>
+                </span>
+            </div>
+        </div>
+    </t>
+
+    <t t-extend="ProductScreenWidget">
+        <!-- <t t-jquery=".control-buttons" t-operation="replace"/>                         -->
+
+        <t t-jquery=".leftpane" t-operation="before">
+            <div class="buttonpane">
+                <div class="control-buttons"></div>
+            </div>            
+        </t>
+    </t>    
+
+</templates>    	

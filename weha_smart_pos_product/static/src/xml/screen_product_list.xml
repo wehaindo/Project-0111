@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <t t-name="ProductListButton">
+        <span class="control-button" style="min-width: 10px !important;">
+            <div style="display: inline-block; vertical-align: middle; align-items: center; height: 33px; line-height: 30px;">
+                <i class="fa fa-history" aria-hidden="true"></i>
+            </div>
+            Product List
+        </span>
+    </t>
+
+    <t t-name="ProductListScreenWidget">
+        <div class="productlist-screen screen">
+            <div class="screen-content productlist-screen">
+                <section class="top-content top-content_finalset1">
+                    <div class="order_set_width">
+                        <span class="button back">
+                            <i class="fa fa-angle-double-left"></i>
+                            Back
+                        </span>
+                        <span class="custom_searchbox">
+                            <input placeholder="Search Product" style="margin: 15px; border-radius: 20px; padding: 10px 15px; border: 1px solid #ccc;" />
+                            <span class="search-clear"></span>
+                        </span>                        
+                    </div>
+                </section>
+                <section class="full-content sh_order_list_full_content">
+                    <div class="window">
+                        <section class="subwindow">
+                            <div class="subwindow-container">
+                                <div class="subwindow-container-fix touch-scrollable scrollable-y order-list-scroll sh_order_screen">
+                                    <div style="padding-right:40px;">
+                                        <table class="product-list weha_product_list">
+                                            <thead class="bgcolorset">
+                                                <tr>
+                                                    <th style="width: 50%; padding-left: 10px;">Name</th>
+                                                    <th style="width: 15%;">SKU</th>
+                                                    <th style="width: 15%;">Barcode</th>                                                                                                        
+                                                    <th style="width: 20%;" class="pos_order_total_header">Price</th>
+                                                    <th style="width: 10%;">Quantity</th>    
+                                                    <th></th>                                                    
+                                                </tr>
+                                            </thead>
+                                            <tbody class="product-list-contents"></tbody>
+                                        </table>
+                                        <div class="product-card-list"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="ProductListLine">
+        <tr t-att-data-id="product.id" class="product_line" style="padding-left: 10px;">
+            <td>
+                <t t-esc="product.display_name" />
+            </td>
+            <td>
+                <t t-esc="product.default_code" />
+            </td>
+            <td>
+                <t t-esc="product.barcode" />
+            </td>
+            <td>
+                <t t-esc="product.get_price(widget.pos.config.pricelist_id[0],1)"/>
+                 <!-- <t t-esc="widget.pos.config.pricelist_id[0]"/> -->
+            </td>
+            <td>
+                <t t-esc="product.qty_available" />
+            </td>
+            <td>
+                <button class="button set-on-order" t-att-data-id="product.id">Add to Order</button>
+            </td>
+        </tr>
+    </t>
+
+    <t t-name="ProductCardLine">
+        <div t-att-data-id="product.id" class="product-card">
+            <div class="card-header">
+                <div class="card-name"><t t-esc="product.display_name" /></div>
+            </div>
+            <div class="card-body">
+                <div><strong>SKU:</strong> <t t-esc="product.default_code" /></div>
+                <div><strong>Barcode:</strong> <t t-esc="product.barcode" /></div>
+                <div><strong>Price:</strong>  <t t-esc="product.get_price(widget.pos.config.pricelist_id[0],1)"/></div>
+                <div><strong>Quantity:</strong> <t t-esc="product.qty_available" /></div>
+            </div>
+            <div class="card-footer">
+                <button class="button set-on-order" t-att-data-id="product.id">
+                    ➕ Add to Order
+                </button>
+            </div>
+        </div>
+        
+    </t>
+</templates>

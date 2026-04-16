@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<odoo>
+    <template id="assets" inherit_id="point_of_sale.assets">
+        <xpath expr="." position="inside">
+            <script type="text/javascript" src="/weha_smart_pos_base_data/static/src/lib/pouchdb-8.0.1.min.js"/>
+            <script type="text/javascript" src="/weha_smart_pos_base_data/static/src/lib/pouchdb.find.js"/>
+            <script type="text/javascript" src="/weha_smart_pos_base_data/static/src/js/db.js"/>
+            <script type="text/javascript" src="/weha_smart_pos_base_data/static/src/js/models.js"/>
+            <script type="text/javascript" src="/weha_smart_pos_base_data/static/src/js/BarcodeScanner.js"/>            
+        </xpath>
+    </template>
+</odoo>

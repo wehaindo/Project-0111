@@ -1,0 +1,87 @@
+.weha_product_list {
+    width: 100%;
+    font-size: 15px;
+}
+.weha_product_list thead tr {
+    line-height: 45px;
+}
+.weha_product_list tr.product_line {
+    background: #fff;
+}
+.weha_product_list thead tr {
+    background: #ccc !important;
+}
+.weha_product_list tr td {
+    padding: 10px 8px;
+}
+
+.product-card-list {
+    display: none; /* hide cards */
+}
+
+@media only screen and (max-width: 1024px){
+    .product-list {
+        display: none; /* hide table */
+    }
+    .product-card-list {
+        display: grid;
+        /* grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); */
+        gap: 10px;
+        padding: 10px;
+    }
+}
+
+.product-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    cursor: pointer;
+}
+
+.product-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.18);
+}
+
+.card-header {
+    /* background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); */
+    color: black;
+    padding: 12px;
+    font-weight: bold;
+    font-size: 16px;
+    text-align: center;
+}
+
+.card-body {
+    padding: 12px;
+    font-size: 14px;
+    color: #333;
+}
+
+.card-body div {
+    margin-bottom: 6px;
+}
+
+.card-footer {
+    padding: 10px;
+    text-align: center;
+    border-top: 1px solid #eee;
+}
+
+.set-on-order {
+    background: black;    
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: bold;    
+}
+
+/* .set-on-order:hover {
+    background: linear-gradient(to right, #feb47b, #ff7e5f);
+} */
+

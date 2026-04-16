@@ -1,0 +1,72 @@
+.pos .rightpane {
+    display: none;
+}
+
+.pos .leftpane {    
+    position: absolute;
+    left: 300px;    
+    top: 0;
+    bottom:0;    
+    right: 0;
+    width: auto;
+}
+
+.pos .order {
+    max-width: 100%;
+}
+
+.pos .numpad {
+    float: left;
+}
+
+.pos .buttonpane {
+    display: block;
+    flex-direction: column;
+    width: 280px;
+    height: 100%;
+    overflow-y: scroll;
+    padding-right: 10px;
+}
+
+
+
+.pos .buttonpane .control-buttons{
+    display: grid;
+    /* grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); */
+    grid-template-columns: repeat(2,1fr);
+    gap: 10px;
+}
+
+.pos .control-buttons {
+    display: none;
+}
+
+@media only screen and (max-width: 1024px){
+    .pos .screen-login {
+        width: 80%;
+    }
+
+    .pos .login-body{
+        display: flex;
+        height:37%;
+    }    
+
+    .pos .buttonpane {
+        display: none;
+    }
+
+    .pos .leftpane {    
+        position:absolute;
+        left:0;
+        width:440px;
+        top:0px;
+        bottom:0;
+        transform: translateX(0%);
+    }    
+
+    .pos .control-buttons {
+        display: flex;        
+    }
+    
+}
+
