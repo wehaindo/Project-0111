@@ -50,7 +50,6 @@ services:
     restart: unless-stopped
     command: >
       --
-      --dev=all
       --log-level=info
       --workers=0
     healthcheck:

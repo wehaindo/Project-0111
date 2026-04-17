@@ -80,6 +80,54 @@
                                 </div>
                             </div>
                         </div>
+                        <!-- Stock Synchronization Settings -->
+                        <div class="col-12 col-lg-6 o_setting_box" attrs="{'invisible': [('enable_hybrid_sync', '=', False)]}">
+                            <div class="o_setting_left_pane">
+                                <field name="enable_stock_sync"/>
+                            </div>
+                            <div class="o_setting_right_pane">
+                                <label for="enable_stock_sync" string="Enable Stock Sync"/>
+                                <div class="text-muted">
+                                    Sync real-time stock quantities from warehouse
+                                </div>
+                                <div class="content-group mt16" attrs="{'invisible': [('enable_stock_sync', '=', False)]}">
+                                    <div class="row">
+                                        <label string="Stock Location" for="stock_location_id" class="col-lg-4 o_light_label"/>
+                                        <field name="stock_location_id"/>
+                                    </div>
+                                    <div class="row">
+                                        <label string="Stock Sync Interval (minutes)" for="stock_sync_interval" class="col-lg-4 o_light_label"/>
+                                        <field name="stock_sync_interval"/>
+                                    </div>
+                                    <div class="row">
+                                        <label string="Low Stock Threshold" for="low_stock_threshold" class="col-lg-4 o_light_label"/>
+                                        <field name="low_stock_threshold"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 col-lg-6 o_setting_box" attrs="{'invisible': [('enable_stock_sync', '=', False)]}">
+                            <div class="o_setting_left_pane">
+                                <field name="show_stock_quantity"/>
+                            </div>
+                            <div class="o_setting_right_pane">
+                                <label for="show_stock_quantity" string="Show Stock Quantity"/>
+                                <div class="text-muted">
+                                    Display stock levels on product cards in POS
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 col-lg-6 o_setting_box" attrs="{'invisible': [('enable_stock_sync', '=', False)]}">
+                            <div class="o_setting_left_pane">
+                                <field name="prevent_negative_stock"/>
+                            </div>
+                            <div class="o_setting_right_pane">
+                                <label for="prevent_negative_stock" string="Prevent Negative Stock"/>
+                                <div class="text-muted">
+                                    Block adding products to cart if insufficient stock
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </xpath>
             </field>

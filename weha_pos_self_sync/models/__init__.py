@@ -8,3 +8,4 @@ from . import pos_deleted_record
 from . import product_pricelist_item
 from . import product_deletion
 from . import res_partner
+from . import pos_stock_sync_metadata

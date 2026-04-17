@@ -106,6 +106,17 @@ const SyncService = Class.extend({
             console.log('Delta sync enabled with interval:', delta_interval, 'ms');
         }
 
+        // Setup periodic stock sync
+        if (this.pos.config && this.pos.config.enable_stock_sync) {
+            const stock_interval = (this.pos.config.stock_sync_interval || 5) * 60 * 1000; // Convert minutes to ms
+            this.stock_sync_interval = setInterval(function() {
+                if (self.is_online) {
+                    self.sync_delta_stock();
+                }
+            }, stock_interval);
+            console.log('Stock sync enabled with interval:', stock_interval, 'ms', `(${this.pos.config.stock_sync_interval} minutes)`);
+        }
+
         return this;
     },
 
@@ -120,6 +131,10 @@ const SyncService = Class.extend({
         if (this.delta_sync_interval) {
             clearInterval(this.delta_sync_interval);
             this.delta_sync_interval = null;
+        }
+        if (this.stock_sync_interval) {
+            clearInterval(this.stock_sync_interval);
+            this.stock_sync_interval = null;
         }
         console.log('Sync service stopped');
     },
@@ -1303,6 +1318,173 @@ const SyncService = Class.extend({
             console.log(`Cleaned up ${deleted} old synced orders`);
         };
         */
+    },
+
+    /**
+     * Sync stock quantities from server (initial load)
+     */
+    sync_stock_quantities: async function() {
+        const config = this.pos.config;
+        
+        // Check if stock sync is enabled
+        if (!config.enable_stock_sync) {
+            console.log('📦 Stock sync is disabled in POS configuration');
+            return {success: false, reason: 'disabled'};
+        }
+
+        console.log('📦 Starting stock quantities sync...');
+        
+        try {
+            const result = await rpc.query({
+                route: '/pos/get_stock_quantities',
+                params: {
+                    session_id: this.pos.pos_session.id
+                }
+            }, {
+                timeout: 60000,
+                shadow: true
+            });
+
+            if (result && result.length > 0) {
+                // Save to IndexedDB
+                await this.db.save_stock_to_indexeddb(result);
+                
+                // Update product models in memory
+                result.forEach(stock => {
+                    const product = this.pos.db.get_product_by_id(stock.product_id);
+                    if (product) {
+                        product.stock_data = stock;
+                    }
+                });
+                
+                // Update sync metadata
+                await this.db.set_sync_metadata('stock_last_sync', new Date().toISOString());
+                await this.db.set_sync_metadata('stock_count', result.length);
+                
+                console.log(`✅ Stock sync completed: ${result.length} products`);
+                
+                return {
+                    success: true,
+                    count: result.length
+                };
+            } else {
+                console.log('⚠️ No stock data returned from server');
+                return {success: false, reason: 'no_data'};
+            }
+        } catch (error) {
+            console.error('❌ Stock sync failed:', error);
+            return {
+                success: false,
+                error: error.message || 'Unknown error'
+            };
+        }
+    },
+
+    /**
+     * Sync stock quantity changes (delta sync)
+     */
+    sync_delta_stock: async function() {
+        const config = this.pos.config;
+        
+        // Check if stock sync is enabled
+        if (!config.enable_stock_sync) {
+            return {success: false, reason: 'disabled'};
+        }
+
+        // Check time interval
+        const last_check = await this.db.get_sync_metadata('stock_delta_last_check');
+        const interval_minutes = config.stock_sync_interval || 5;
+        
+        if (last_check) {
+            const last_check_time = new Date(last_check);
+            const now = new Date();
+            const minutes_since_check = (now - last_check_time) / (1000 * 60);
+            
+            if (minutes_since_check < interval_minutes) {
+                console.log(`⏸️ Stock delta sync skipped - last check was ${Math.round(minutes_since_check)} minutes ago (interval: ${interval_minutes} min)`);
+                return {success: false, reason: 'interval_not_reached'};
+            }
+        }
+
+        console.log(`📦 Starting delta stock sync (interval: ${interval_minutes} min)...`);
+
+        try {
+            const last_sync = await this.db.get_sync_metadata('stock_last_sync');
+            const since_timestamp = last_sync || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+            const result = await rpc.query({
+                route: '/pos/get_stock_updates',
+                params: {
+                    session_id: this.pos.pos_session.id,
+                    since_timestamp: since_timestamp
+                }
+            }, {
+                timeout: 30000,
+                shadow: true
+            });
+
+            // Update last check time
+            await this.db.set_sync_metadata('stock_delta_last_check', new Date().toISOString());
+
+            if (result && result.length > 0) {
+                // Save updated stock to IndexedDB
+                await this.db.save_stock_to_indexeddb(result);
+                
+                // Update product models in memory
+                result.forEach(stock => {
+                    const product = this.pos.db.get_product_by_id(stock.product_id);
+                    if (product) {
+                        product.stock_data = stock;
+                    }
+                });
+                
+                // Update sync metadata
+                await this.db.set_sync_metadata('stock_last_sync', new Date().toISOString());
+                
+                console.log(`✅ Delta stock sync: ${result.length} products updated`);
+                
+                return {
+                    success: true,
+                    updated: result.length
+                };
+            } else {
+                console.log('✅ Delta stock sync: no changes');
+                return {success: true, updated: 0};
+            }
+        } catch (error) {
+            console.error('❌ Delta stock sync failed:', error);
+            return {
+                success: false,
+                error: error.message || 'Unknown error'
+            };
+        }
+    },
+
+    /**
+     * Check for deleted stock records (products removed from location)
+     */
+    sync_deleted_stock: async function(product_ids) {
+        if (!product_ids || product_ids.length === 0) {
+            return {success: true, deleted: 0};
+        }
+
+        try {
+            // Delete stock records for deleted products
+            await this.db.delete_stock_from_indexeddb(product_ids);
+            
+            console.log(`🗑️ Deleted stock for ${product_ids.length} products`);
+            
+            return {
+                success: true,
+                deleted: product_ids.length
+            };
+        } catch (error) {
+            console.error('❌ Delete stock sync failed:', error);
+            return {
+                success: false,
+                error: error.message || 'Unknown error'
+            };
+        }
     },
 });
 

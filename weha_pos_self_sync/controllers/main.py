@@ -455,6 +455,181 @@ class PosHybridSyncController(http.Controller):
             _logger.error(f'Error in get_deleted_partners: {str(e)}', exc_info=True)
             return []
 
+    @http.route('/pos/get_stock_quantities', type='json', auth='user', methods=['POST'])
+    def get_stock_quantities(self, session_id, product_ids=None, **kwargs):
+        """
+        Get stock quantities for products in POS location
+        
+        Args:
+            session_id: Current POS session ID
+            product_ids: Optional list of product IDs to get stock for (None = all)
+            
+        Returns:
+            list: Stock data [{product_id, qty_available, virtual_available, location_id, write_date}]
+        """
+        try:
+            session = request.env['pos.session'].browse(session_id)
+            config = session.config_id
+            
+            # Determine stock location
+            if config.stock_location_id:
+                location = config.stock_location_id
+            elif config.picking_type_id:
+                location = config.picking_type_id.default_location_src_id
+            else:
+                _logger.error('No stock location configured for POS')
+                return []
+            
+            # Build domain for stock quants
+            domain = [
+                ('location_id', 'child_of', location.id),
+            ]
+            
+            if product_ids:
+                domain.append(('product_id', 'in', product_ids))
+            
+            # Get stock quants
+            quants = request.env['stock.quant'].sudo().search(domain)
+            
+            # Aggregate stock by product
+            stock_by_product = {}
+            for quant in quants:
+                product_id = quant.product_id.id
+                if product_id not in stock_by_product:
+                    stock_by_product[product_id] = {
+                        'product_id': product_id,
+                        'qty_available': 0,
+                        'virtual_available': 0,
+                        'location_id': location.id,
+                        'write_date': False
+                    }
+                
+                stock_by_product[product_id]['qty_available'] += quant.quantity
+                stock_by_product[product_id]['virtual_available'] += (quant.quantity - quant.reserved_quantity)
+                
+                # Keep the latest write_date
+                if quant.write_date:
+                    if not stock_by_product[product_id]['write_date'] or quant.write_date > stock_by_product[product_id]['write_date']:
+                        stock_by_product[product_id]['write_date'] = quant.write_date.isoformat()
+            
+            stock_data = list(stock_by_product.values())
+            
+            _logger.info(f'Loaded stock for {len(stock_data)} products from location {location.name}')
+            
+            return stock_data
+            
+        except Exception as e:
+            _logger.error(f'Error in get_stock_quantities: {str(e)}', exc_info=True)
+            return []
+
+    @http.route('/pos/get_stock_updates', type='json', auth='user', methods=['POST'])
+    def get_stock_updates(self, session_id, since_timestamp, **kwargs):
+        """
+        Get stock quantities that changed since a timestamp (delta sync)
+        
+        Args:
+            session_id: Current POS session ID
+            since_timestamp: ISO format datetime string
+            
+        Returns:
+            list: Stock data for changed products
+        """
+        try:
+            session = request.env['pos.session'].browse(session_id)
+            config = session.config_id
+            
+            # Determine stock location
+            if config.stock_location_id:
+                location = config.stock_location_id
+            elif config.picking_type_id:
+                location = config.picking_type_id.default_location_src_id
+            else:
+                _logger.error('No stock location configured for POS')
+                return []
+            
+            # Parse timestamp
+            from datetime import datetime
+            since_dt = datetime.fromisoformat(since_timestamp.replace('Z', '+00:00'))
+            
+            # Find quants modified since timestamp
+            domain = [
+                ('location_id', 'child_of', location.id),
+                ('write_date', '>', since_dt)
+            ]
+            
+            quants = request.env['stock.quant'].sudo().search(domain)
+            
+            # Aggregate stock by product
+            stock_by_product = {}
+            for quant in quants:
+                product_id = quant.product_id.id
+                if product_id not in stock_by_product:
+                    stock_by_product[product_id] = {
+                        'product_id': product_id,
+                        'qty_available': 0,
+                        'virtual_available': 0,
+                        'location_id': location.id,
+                        'write_date': False
+                    }
+                
+                stock_by_product[product_id]['qty_available'] += quant.quantity
+                stock_by_product[product_id]['virtual_available'] += (quant.quantity - quant.reserved_quantity)
+                
+                if quant.write_date:
+                    if not stock_by_product[product_id]['write_date'] or quant.write_date > stock_by_product[product_id]['write_date']:
+                        stock_by_product[product_id]['write_date'] = quant.write_date.isoformat()
+            
+            stock_data = list(stock_by_product.values())
+            
+            _logger.info(f'Found {len(stock_data)} products with stock changes since {since_timestamp}')
+            
+            return stock_data
+            
+        except Exception as e:
+            _logger.error(f'Error in get_stock_updates: {str(e)}', exc_info=True)
+            return []
+
+    @http.route('/pos/get_stock_count', type='json', auth='user', methods=['POST'])
+    def get_stock_count(self, session_id, since_timestamp=None, **kwargs):
+        """
+        Get count of products with stock changes
+        
+        Args:
+            session_id: Current POS session ID
+            since_timestamp: Optional ISO format datetime string
+            
+        Returns:
+            dict: {'count': int}
+        """
+        try:
+            session = request.env['pos.session'].browse(session_id)
+            config = session.config_id
+            
+            # Determine stock location
+            if config.stock_location_id:
+                location = config.stock_location_id
+            elif config.picking_type_id:
+                location = config.picking_type_id.default_location_src_id
+            else:
+                return {'count': 0}
+            
+            domain = [('location_id', 'child_of', location.id)]
+            
+            if since_timestamp:
+                from datetime import datetime
+                since_dt = datetime.fromisoformat(since_timestamp.replace('Z', '+00:00'))
+                domain.append(('write_date', '>', since_dt))
+            
+            # Count distinct products with stock changes
+            quants = request.env['stock.quant'].sudo().search(domain)
+            product_ids = set(quants.mapped('product_id.id'))
+            
+            return {'count': len(product_ids)}
+            
+        except Exception as e:
+            _logger.error(f'Error in get_stock_count: {str(e)}', exc_info=True)
+            return {'count': 0}
+
 
     @http.route('/pos/retry_failed_orders', type='json', auth='user', methods=['POST'])
     def retry_failed_orders(self, session_id, order_uuids=None, **kwargs):

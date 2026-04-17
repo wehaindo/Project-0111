@@ -76,6 +76,14 @@ models.PosModel = models.PosModel.extend({
                 }, 5000);
             }
 
+            // Initial stock sync
+            if (this.config.enable_stock_sync) {
+                setTimeout(() => {
+                    console.log('📦 Starting initial stock sync...');
+                    this.sync_service.sync_stock_quantities();
+                }, 8000); // After delta sync
+            }
+
         } catch (error) {
             console.error('Error initializing sync service:', error);
         }

@@ -238,3 +238,93 @@
     color: #1565c0;
     animation: pulse 1.5s infinite;
 }
+/* Manual Sync Controls */
+.manual-sync-controls {
+    display: flex;
+    gap: 10px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    margin: 10px;
+    flex-wrap: wrap;
+}
+
+.manual-sync-controls .button {
+    flex: 1;
+    min-width: 140px;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: white;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.manual-sync-controls .btn-delta-sync {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.manual-sync-controls .btn-delta-sync:hover {
+    background: linear-gradient(135deg, #5568d3 0%, #63428a 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+}
+
+.manual-sync-controls .btn-delete-sync {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.manual-sync-controls .btn-delete-sync:hover {
+    background: linear-gradient(135deg, #d87ee3 0%, #d84659 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(245, 87, 108, 0.4);
+}
+
+.manual-sync-controls .btn-stock-sync {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+.manual-sync-controls .btn-stock-sync:hover {
+    background: linear-gradient(135deg, #3e92e5 0%, #00d9e5 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(79, 172, 254, 0.4);
+}
+
+.manual-sync-controls .button:active {
+    transform: translateY(0);
+}
+
+.manual-sync-controls .button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.manual-sync-controls .button i {
+    font-size: 16px;
+}
+
+/* Syncing animation for buttons */
+.manual-sync-controls .button.syncing {
+    position: relative;
+    pointer-events: none;
+}
+
+.manual-sync-controls .button.syncing i {
+    animation: rotate 1s linear infinite;
+}
+
+@keyframes rotate {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}

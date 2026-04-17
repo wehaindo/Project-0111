@@ -188,6 +188,9 @@ models.PosModel = models.PosModel.extend({
             // Preload pricelist items for active pricelist
             await this._preload_pricelist_items();
             
+            // Load stock data for products
+            await this._load_stock_data();
+            
         } catch (error) {
             console.error('Error loading products from cache:', error);
             // Start background sync as fallback
@@ -242,6 +245,40 @@ models.PosModel = models.PosModel.extend({
             }
         } catch (error) {
             console.error('Error preloading pricelist items:', error);
+        }
+    },
+
+    /**
+     * Load stock data from IndexedDB and attach to products
+     */
+    _load_stock_data: async function() {
+        if (!this.config || !this.config.enable_stock_sync) {
+            return;
+        }
+
+        console.log('📦 Loading stock data from IndexedDB...');
+        
+        try {
+            const stock_data = await this.db.get_all_stock_from_indexeddb();
+            
+            if (!stock_data || stock_data.length === 0) {
+                console.log('No stock data in IndexedDB yet');
+                return;
+            }
+
+            // Attach stock data to products
+            let attached_count = 0;
+            stock_data.forEach(stock => {
+                const product = this.db.get_product_by_id(stock.product_id);
+                if (product) {
+                    product.stock_data = stock;
+                    attached_count++;
+                }
+            });
+
+            console.log(`✅ Stock data loaded: ${attached_count} products have stock info`);
+        } catch (error) {
+            console.error('Error loading stock data:', error);
         }
     },
 
@@ -439,6 +476,10 @@ models.PosModel = models.PosModel.extend({
                 // Load minimal partners from server
                 await this._load_initial_partners_from_server();
             }
+            
+            // Load stock data
+            await this._load_stock_data();
+            
         } catch (error) {
             console.error('Error loading partners from cache:', error);
             await this._load_initial_partners_from_server();
@@ -851,6 +892,62 @@ models.Order = models.Order.extend({
             return v.toString(16);
         });
     },
+
+    /**
+     * Update local stock quantities when order is finalized
+     */
+    finalize: function() {
+        _super_order.finalize.apply(this, arguments);
+        
+        // Update stock for each orderline
+        if (this.pos.config && this.pos.config.enable_stock_sync) {
+            this.orderlines.models.forEach(line => {
+                const product = line.get_product();
+                const quantity = line.get_quantity();
+                
+                if (product && quantity > 0) {
+                    // Deduct stock locally
+                    this._update_product_stock(product, -quantity);
+                }
+            });
+        }
+    },
+
+    /**
+     * Update product stock in IndexedDB and memory
+     */
+    _update_product_stock: async function(product, qty_change) {
+        try {
+            const location_id = this.pos.config.stock_location_id 
+                ? this.pos.config.stock_location_id[0] 
+                : (this.pos.config.picking_type_id ? this.pos.config.picking_type_id.default_location_src_id[0] : null);
+            
+            if (!location_id) {
+                return;
+            }
+
+            // Update in IndexedDB
+            const new_qty = await this.pos.db.update_stock_quantity(product.id, qty_change, location_id);
+            
+            // Update in memory
+            if (product.stock_data) {
+                product.stock_data.qty_available = new_qty;
+                product.stock_data.virtual_available = new_qty;
+            } else {
+                product.stock_data = {
+                    product_id: product.id,
+                    qty_available: new_qty,
+                    virtual_available: new_qty,
+                    location_id: location_id,
+                    last_update: new Date().toISOString()
+                };
+            }
+
+            console.log(`📦 Stock updated for ${product.display_name}: ${qty_change > 0 ? '+' : ''}${qty_change} (new: ${new_qty})`);
+        } catch (error) {
+            console.error('Error updating product stock:', error);
+        }
+    },
 });
 
 // Extend Product model to ensure get_display_price and get_price methods exist
@@ -981,7 +1078,89 @@ models.Product = models.Product.extend({
         }
         
         return price;
-    }
+    },
+
+    /**
+     * Get stock quantity from IndexedDB
+     */
+    get_stock_quantity: async function() {
+        if (!this.pos || !this.pos.db) {
+            return null;
+        }
+
+        try {
+            const stock = await this.pos.db.get_stock_from_indexeddb(this.id);
+            return stock;
+        } catch (error) {
+            console.error(`Error getting stock for product ${this.id}:`, error);
+            return null;
+        }
+    },
+
+    /**
+     * Get stock quantity synchronously (from cached value)
+     */
+    get_stock_qty_sync: function() {
+        if (!this.stock_data) {
+            return 0;
+        }
+        return this.stock_data.qty_available || 0;
+    },
+
+    /**
+     * Get virtual stock quantity (available - reserved)
+     */
+    get_virtual_stock_qty: function() {
+        if (!this.stock_data) {
+            return 0;
+        }
+        return this.stock_data.virtual_available || 0;
+    },
+
+    /**
+     * Check if product has sufficient stock
+     */
+    has_sufficient_stock: function(qty_needed) {
+        const config = this.pos ? this.pos.config : null;
+        
+        // If stock checking is disabled, always return true
+        if (!config || !config.enable_stock_sync || !config.prevent_negative_stock) {
+            return true;
+        }
+
+        const available = this.get_virtual_stock_qty();
+        return available >= qty_needed;
+    },
+
+    /**
+     * Check if stock is low (below threshold)
+     */
+    is_low_stock: function() {
+        const config = this.pos ? this.pos.config : null;
+        
+        if (!config || !config.enable_stock_sync || !config.show_stock_quantity) {
+            return false;
+        }
+
+        const threshold = config.low_stock_threshold || 10;
+        const available = this.get_stock_qty_sync();
+        
+        return available > 0 && available <= threshold;
+    },
+
+    /**
+     * Check if product is out of stock
+     */
+    is_out_of_stock: function() {
+        const config = this.pos ? this.pos.config : null;
+        
+        if (!config || !config.enable_stock_sync) {
+            return false;
+        }
+
+        const available = this.get_virtual_stock_qty();
+        return available <= 0;
+    },
 });
 
 return models;
