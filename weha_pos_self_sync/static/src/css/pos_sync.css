@@ -62,6 +62,30 @@
     text-align: center;
 }
 
+/* Delta Sync Badge */
+.delta-sync-badge {
+    background-color: #2196f3;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: bold;
+    margin-left: 5px;
+    animation: pulse-blue 1.5s infinite;
+    display: inline-block;
+}
+
+@keyframes pulse-blue {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.05);
+    }
+}
+
 /* Offline Banner */
 .offline-banner {
     position: fixed;

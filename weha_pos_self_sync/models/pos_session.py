@@ -47,9 +47,10 @@ class PosSession(models.Model):
         if session.config_id.limit_categories and session.config_id.iface_available_categ_ids:
             domain_products.append(('pos_categ_id', 'in', session.config_id.iface_available_categ_ids.ids))
         
-        # Fetch updated products
-        products = self.env['product.product'].search_read(
-            domain_products,
+        # Fetch updated products using custom method that checks template write_date
+        products = self.env['product.product'].get_pos_delta_products(
+            last_write_date=last_write_date,
+            domain=domain_products,
             fields=[
                 'id', 'name', 'display_name', 'lst_price', 'standard_price',
                 'categ_id', 'pos_categ_id', 'taxes_id', 'barcode', 'default_code',

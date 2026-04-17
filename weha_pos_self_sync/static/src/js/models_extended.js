@@ -180,19 +180,124 @@ models.PosModel = models.PosModel.extend({
                 
                 this.db.add_products(product_models);
             } else {
-                // No cache, load initial batch from server
-                console.log('⚠ No product cache, loading from server...');
-                await this._load_initial_products_from_server(limit);
+                // No cache - start background sync without blocking
+                console.log('⚠ No product cache - starting background sync from server...');
+                this._start_background_product_sync();
             }
         } catch (error) {
             console.error('Error loading products from cache:', error);
-            // Fallback to server load
-            await this._load_initial_products_from_server(limit);
+            // Start background sync as fallback
+            this._start_background_product_sync();
         }
     },
 
     /**
-     * Load initial products from server
+     * Start background product sync from server (non-blocking)
+     * Allows POS to be used immediately while products load in background
+     */
+    _start_background_product_sync: function() {
+        const self = this;
+        
+        console.log('🔄 Starting background product sync...');
+        
+        // Run after a short delay to let POS UI load
+        setTimeout(function() {
+            self._background_sync_all_products().then(function(total) {
+                console.log(`✓ Background sync complete: ${total} products synced`);
+            }).catch(function(error) {
+                console.error('Background sync error:', error);
+            });
+        }, 2000);
+    },
+
+    /**
+     * Background sync all products from server in batches
+     */
+    _background_sync_all_products: async function() {
+        const self = this;
+        const batch_size = 500;
+        let total_synced = 0;
+        let offset = 0;
+        
+        try {
+            const domain = [['available_in_pos', '=', true]];
+            
+            if (this.config && this.config.iface_available_categ_ids && this.config.iface_available_categ_ids.length) {
+                domain.push(['pos_categ_id', 'in', this.config.iface_available_categ_ids]);
+            }
+
+            const product_fields = ['id', 'name', 'display_name', 'lst_price', 'standard_price',
+                'categ_id', 'pos_categ_id', 'taxes_id', 'barcode', 'default_code',
+                'to_weight', 'uom_id', 'description_sale', 'description',
+                'product_tmpl_id', 'tracking', 'write_date', 'available_in_pos'];
+
+            // Load products in batches
+            while (true) {
+                const products = await rpc.query({
+                    model: 'product.product',
+                    method: 'search_read',
+                    args: [domain, product_fields],
+                    kwargs: {
+                        limit: batch_size,
+                        offset: offset
+                    }
+                });
+
+                if (!products || products.length === 0) {
+                    break; // No more products
+                }
+
+                console.log(`📦 Syncing batch: ${offset + 1}-${offset + products.length}`);
+                
+                // Convert to Product model instances
+                const using_company_currency = this.config.currency_id[0] === this.company.currency_id[0];
+                const conversion_rate = this.currency.rate / this.company_currency.rate;
+                
+                const product_models = _.map(products, function (product) {
+                    if (!using_company_currency) {
+                        product.lst_price = Math.round(product.lst_price * conversion_rate * Math.pow(10, 2)) / Math.pow(10, 2);
+                    }
+                    let categ = null;
+                    if (product.pos_categ_id && product.pos_categ_id[0]) {
+                        categ = _.findWhere(self.pos_categ, {'id': product.pos_categ_id[0]});
+                    }
+                    if (!categ && product.categ_id && product.categ_id[0]) {
+                        categ = _.findWhere(self.product_categories, {'id': product.categ_id[0]});
+                    }
+                    product.categ = categ || { id: 0, name: 'Uncategorized' };
+                    product.pos = self;
+                    return new models.Product({}, product);
+                });
+                
+                // Add to memory and cache to IndexedDB
+                this.db.add_products(product_models);
+                await this.db.save_products_to_indexeddb(products);
+                
+                total_synced += products.length;
+                offset += batch_size;
+                
+                // Trigger UI update
+                this.trigger('products:synced', { count: total_synced });
+                
+                // Small delay between batches to prevent blocking
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // If less than batch_size, we've reached the end
+                if (products.length < batch_size) {
+                    break;
+                }
+            }
+            
+            return total_synced;
+            
+        } catch (error) {
+            console.error('Error in background sync:', error);
+            throw error;
+        }
+    },
+
+    /**
+     * Load initial products from server (used only in normal mode)
      */
     _load_initial_products_from_server: async function(limit) {
         var self = this;
