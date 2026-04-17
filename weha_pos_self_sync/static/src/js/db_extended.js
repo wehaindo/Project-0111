@@ -13,12 +13,12 @@ const PosDB = require('point_of_sale.DB');
 
 PosDB.include({
     name: 'pos_hybrid_sync_db',
-    version: 2,
+    version: 3,  // Increment version for pricelist items
 
     init: function(options) {
         this._super(options);
         this.db_name = 'pos_hybrid_sync_db';
-        this.db_version = 2;
+        this.db_version = 3;  // Increment version
         this.indexedDB = null;
         this.sync_logs = [];
         this.orders_queue = [];
@@ -84,6 +84,14 @@ PosDB.include({
 
                 if (!db.objectStoreNames.contains('sync_metadata')) {
                     db.createObjectStore('sync_metadata', { keyPath: 'key' });
+                }
+
+                if (!db.objectStoreNames.contains('pricelist_items_cache')) {
+                    const pricelistStore = db.createObjectStore('pricelist_items_cache', { keyPath: 'id' });
+                    pricelistStore.createIndex('pricelist_id', 'pricelist_id', { unique: false });
+                    pricelistStore.createIndex('product_id', 'product_id', { unique: false });
+                    pricelistStore.createIndex('product_tmpl_id', 'product_tmpl_id', { unique: false });
+                    pricelistStore.createIndex('write_date', 'write_date', { unique: false });
                 }
 
                 console.log('IndexedDB schema created/upgraded');
@@ -268,6 +276,191 @@ PosDB.include({
 
             request.onerror = (event) => {
                 console.error('Error getting partners:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Save pricelist items to IndexedDB
+     */
+    save_pricelist_items_to_indexeddb: async function(items) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['pricelist_items_cache'], 'readwrite');
+            const store = transaction.objectStore('pricelist_items_cache');
+
+            let count = 0;
+            items.forEach(item => {
+                // Clean the item data - remove functions and ensure proper structure
+                const clean_item = {
+                    id: item.id,
+                    pricelist_id: Array.isArray(item.pricelist_id) ? item.pricelist_id[0] : item.pricelist_id,
+                    product_tmpl_id: item.product_tmpl_id ? (Array.isArray(item.product_tmpl_id) ? item.product_tmpl_id[0] : item.product_tmpl_id) : false,
+                    product_id: item.product_id ? (Array.isArray(item.product_id) ? item.product_id[0] : item.product_id) : false,
+                    categ_id: item.categ_id ? (Array.isArray(item.categ_id) ? item.categ_id[0] : item.categ_id) : false,
+                    min_quantity: item.min_quantity || 0,
+                    applied_on: item.applied_on,
+                    base: item.base,
+                    base_pricelist_id: item.base_pricelist_id ? (Array.isArray(item.base_pricelist_id) ? item.base_pricelist_id[0] : item.base_pricelist_id) : false,
+                    compute_price: item.compute_price,
+                    fixed_price: item.fixed_price || 0,
+                    percent_price: item.percent_price || 0,
+                    price_discount: item.price_discount || 0,
+                    price_surcharge: item.price_surcharge || 0,
+                    price_round: item.price_round || 0,
+                    price_min_margin: item.price_min_margin || 0,
+                    price_max_margin: item.price_max_margin || 0,
+                    company_id: item.company_id ? (Array.isArray(item.company_id) ? item.company_id[0] : item.company_id) : false,
+                    currency_id: item.currency_id ? (Array.isArray(item.currency_id) ? item.currency_id[0] : item.currency_id) : false,
+                    date_start: item.date_start || false,
+                    date_end: item.date_end || false,
+                    write_date: item.write_date
+                };
+                
+                console.log('Saving pricelist item to IndexedDB:', clean_item);
+                store.put(clean_item);
+                count++;
+            });
+
+            transaction.oncomplete = () => {
+                console.log(`Saved ${count} pricelist items to IndexedDB`);
+                resolve(count);
+            };
+
+            transaction.onerror = (event) => {
+                console.error('Error saving pricelist items:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Get pricelist items from IndexedDB
+     */
+    get_pricelist_items_from_indexeddb: async function(pricelist_id = null) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['pricelist_items_cache'], 'readonly');
+            const store = transaction.objectStore('pricelist_items_cache');
+            
+            let request;
+            if (pricelist_id) {
+                const index = store.index('pricelist_id');
+                request = index.getAll(pricelist_id);
+            } else {
+                request = store.getAll();
+            }
+
+            request.onsuccess = (event) => {
+                resolve(event.target.result);
+            };
+
+            request.onerror = (event) => {
+                console.error('Error getting pricelist items:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Get all pricelist items from IndexedDB (for deletion detection)
+     */
+    get_all_pricelist_items_from_indexeddb: async function() {
+        return this.get_pricelist_items_from_indexeddb(null);
+    },
+
+    /**
+     * Delete specific pricelist items from IndexedDB
+     */
+    delete_pricelist_items_from_indexeddb: async function(item_ids) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['pricelist_items_cache'], 'readwrite');
+            const store = transaction.objectStore('pricelist_items_cache');
+            
+            let deleted = 0;
+            item_ids.forEach(id => {
+                const request = store.delete(id);
+                request.onsuccess = () => deleted++;
+            });
+
+            transaction.oncomplete = () => {
+                console.log(`Deleted ${deleted} pricelist items from IndexedDB`);
+                resolve(deleted);
+            };
+
+            transaction.onerror = (event) => {
+                console.error('Error deleting pricelist items:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Delete specific products from IndexedDB
+     */
+    delete_products_from_indexeddb: async function(product_ids) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['products_cache'], 'readwrite');
+            const store = transaction.objectStore('products_cache');
+            
+            let deleted = 0;
+            product_ids.forEach(id => {
+                const request = store.delete(id);
+                request.onsuccess = () => deleted++;
+            });
+
+            transaction.oncomplete = () => {
+                console.log(`Deleted ${deleted} products from IndexedDB`);
+                resolve(deleted);
+            };
+
+            transaction.onerror = (event) => {
+                console.error('Error deleting products:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Delete specific partners from IndexedDB
+     */
+    delete_partners_from_indexeddb: async function(partner_ids) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['partners_cache'], 'readwrite');
+            const store = transaction.objectStore('partners_cache');
+            
+            let deleted = 0;
+            partner_ids.forEach(id => {
+                const request = store.delete(id);
+                request.onsuccess = () => deleted++;
+            });
+
+            transaction.oncomplete = () => {
+                console.log(`Deleted ${deleted} partners from IndexedDB`);
+                resolve(deleted);
+            };
+
+            transaction.onerror = (event) => {
+                console.error('Error deleting partners:', event);
                 reject(event);
             };
         });

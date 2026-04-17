@@ -38,6 +38,7 @@ Technical:
         'security/ir.model.access.csv',
         'views/assets.xml',
         'views/pos_config_views.xml',
+        'views/pos_deleted_record_views.xml',
     ],
     'qweb': [
         'static/src/xml/pos_templates.xml',
