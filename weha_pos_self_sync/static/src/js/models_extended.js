@@ -184,10 +184,64 @@ models.PosModel = models.PosModel.extend({
                 console.log('⚠ No product cache - starting background sync from server...');
                 this._start_background_product_sync();
             }
+            
+            // Preload pricelist items for active pricelist
+            await this._preload_pricelist_items();
+            
         } catch (error) {
             console.error('Error loading products from cache:', error);
             // Start background sync as fallback
             this._start_background_product_sync();
+        }
+    },
+
+    /**
+     * Preload pricelist items from IndexedDB for active pricelist(s)
+     */
+    _preload_pricelist_items: async function() {
+        try {
+            if (!this.pricelists || this.pricelists.length === 0) {
+                console.log('No pricelists configured');
+                return;
+            }
+            
+            console.log(`Loading pricelist items for ${this.pricelists.length} pricelist(s)...`);
+            
+            for (const pricelist of this.pricelists) {
+                if (!pricelist.items || pricelist.items.length === 0) {
+                    const items = await this.db.get_pricelist_items_from_indexeddb(pricelist.id);
+                    if (items && items.length > 0) {
+                        // Clean items to ensure proper format (IDs as integers, not arrays)
+                        pricelist.items = items.map(item => ({
+                            id: item.id,
+                            pricelist_id: Array.isArray(item.pricelist_id) ? item.pricelist_id[0] : item.pricelist_id,
+                            product_tmpl_id: item.product_tmpl_id ? (Array.isArray(item.product_tmpl_id) ? item.product_tmpl_id[0] : item.product_tmpl_id) : false,
+                            product_id: item.product_id ? (Array.isArray(item.product_id) ? item.product_id[0] : item.product_id) : false,
+                            categ_id: item.categ_id ? (Array.isArray(item.categ_id) ? item.categ_id[0] : item.categ_id) : false,
+                            min_quantity: item.min_quantity || 0,
+                            applied_on: item.applied_on,
+                            base: item.base,
+                            base_pricelist_id: item.base_pricelist_id ? (Array.isArray(item.base_pricelist_id) ? item.base_pricelist_id[0] : item.base_pricelist_id) : false,
+                            compute_price: item.compute_price,
+                            fixed_price: item.fixed_price || 0,
+                            percent_price: item.percent_price || 0,
+                            price_discount: item.price_discount || 0,
+                            price_surcharge: item.price_surcharge || 0,
+                            price_round: item.price_round || 0,
+                            price_min_margin: item.price_min_margin || 0,
+                            price_max_margin: item.price_max_margin || 0,
+                            company_id: item.company_id ? (Array.isArray(item.company_id) ? item.company_id[0] : item.company_id) : false,
+                            currency_id: item.currency_id ? (Array.isArray(item.currency_id) ? item.currency_id[0] : item.currency_id) : false,
+                            date_start: item.date_start || false,
+                            date_end: item.date_end || false,
+                            write_date: item.write_date
+                        }));
+                        console.log(`✓ Loaded and cleaned ${pricelist.items.length} items for pricelist "${pricelist.name || pricelist.id}"`);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error preloading pricelist items:', error);
         }
     },
 
@@ -249,29 +303,38 @@ models.PosModel = models.PosModel.extend({
 
                 console.log(`📦 Syncing batch: ${offset + 1}-${offset + products.length}`);
                 
-                // Convert to Product model instances
-                const using_company_currency = this.config.currency_id[0] === this.company.currency_id[0];
-                const conversion_rate = this.currency.rate / this.company_currency.rate;
-                
-                const product_models = _.map(products, function (product) {
-                    if (!using_company_currency) {
-                        product.lst_price = Math.round(product.lst_price * conversion_rate * Math.pow(10, 2)) / Math.pow(10, 2);
-                    }
-                    let categ = null;
-                    if (product.pos_categ_id && product.pos_categ_id[0]) {
-                        categ = _.findWhere(self.pos_categ, {'id': product.pos_categ_id[0]});
-                    }
-                    if (!categ && product.categ_id && product.categ_id[0]) {
-                        categ = _.findWhere(self.product_categories, {'id': product.categ_id[0]});
-                    }
-                    product.categ = categ || { id: 0, name: 'Uncategorized' };
-                    product.pos = self;
-                    return new models.Product({}, product);
-                });
-                
-                // Add to memory and cache to IndexedDB
-                this.db.add_products(product_models);
+                // Save to IndexedDB first
                 await this.db.save_products_to_indexeddb(products);
+                
+                // Only add to memory if NOT in lazy mode
+                const sync_method = (this.config && this.config.sync_method) || 'normal';
+                if (sync_method !== 'lazy') {
+                    // Convert to Product model instances
+                    const using_company_currency = this.config.currency_id[0] === this.company.currency_id[0];
+                    const conversion_rate = this.currency.rate / this.company_currency.rate;
+                    
+                    const product_models = _.map(products, function (product) {
+                        if (!using_company_currency) {
+                            product.lst_price = Math.round(product.lst_price * conversion_rate * Math.pow(10, 2)) / Math.pow(10, 2);
+                        }
+                        let categ = null;
+                        if (product.pos_categ_id && product.pos_categ_id[0]) {
+                            categ = _.findWhere(self.pos_categ, {'id': product.pos_categ_id[0]});
+                        }
+                        if (!categ && product.categ_id && product.categ_id[0]) {
+                            categ = _.findWhere(self.product_categories, {'id': product.categ_id[0]});
+                        }
+                        product.categ = categ || { id: 0, name: 'Uncategorized' };
+                        product.pos = self;
+                        return new models.Product({}, product);
+                    });
+                    
+                    // Add to memory
+                    this.db.add_products(product_models);
+                    console.log(`✓ Added ${product_models.length} products to memory`);
+                } else {
+                    console.log(`⚡ Lazy mode: ${products.length} products saved to IndexedDB only`);
+                }
                 
                 total_synced += products.length;
                 offset += batch_size;
@@ -796,6 +859,7 @@ const _super_product = models.Product.prototype;
 models.Product = models.Product.extend({
     /**
      * Get product price with pricelist applied
+     * Works synchronously with cached pricelist items
      */
     get_price: function(pricelist, quantity) {
         var self = this;
@@ -803,6 +867,7 @@ models.Product = models.Product.extend({
         
         // If no pricelist, return standard price
         if (!pricelist) {
+            console.log(`No pricelist for product ${this.id}, returning lst_price: ${this.lst_price}`);
             return this.lst_price || 0;
         }
 
@@ -810,15 +875,54 @@ models.Product = models.Product.extend({
         var price = this.lst_price || 0;
         var items = [];
         
-        // Get pricelist items for this product
-        if (pricelist.items) {
+        console.log(`Getting price for product ${this.id} (${this.display_name}) with pricelist ${pricelist.id}`);
+        console.log(`Product template ID:`, this.product_tmpl_id, `(type: ${typeof this.product_tmpl_id}, isArray: ${Array.isArray(this.product_tmpl_id)})`);
+        console.log(`Category ID:`, this.categ_id, `(type: ${typeof this.categ_id}, isArray: ${Array.isArray(this.categ_id)})`);
+        console.log(`Pricelist has ${pricelist.items ? pricelist.items.length : 0} items`);
+        
+        // Debug: log first pricelist item structure
+        if (pricelist.items && pricelist.items.length > 0) {
+            console.log('First pricelist item:', pricelist.items[0]);
+            console.log('Item product_tmpl_id type:', typeof pricelist.items[0].product_tmpl_id, 'value:', pricelist.items[0].product_tmpl_id);
+        }
+        
+        // Get pricelist items for this product (from cached items in pricelist)
+        if (pricelist.items && pricelist.items.length > 0) {
             items = _.filter(pricelist.items, function(item) {
-                return (!item.product_id || item.product_id[0] === self.id) &&
-                       (!item.product_tmpl_id || item.product_tmpl_id[0] === self.product_tmpl_id[0]) &&
-                       (!item.categ_id || item.categ_id[0] === self.categ_id[0]) &&
-                       (!item.date_start || moment(item.date_start).isSameOrBefore(date)) &&
-                       (!item.date_end || moment(item.date_end).isSameOrAfter(date));
+                // Extract IDs properly - handle both array [id, name] and plain id formats
+                var self_product_id = self.id;
+                var self_tmpl_id = Array.isArray(self.product_tmpl_id) ? self.product_tmpl_id[0] : self.product_tmpl_id;
+                var self_cat_id = Array.isArray(self.categ_id) ? self.categ_id[0] : self.categ_id;
+                
+                // Item IDs are already stored as plain integers from IndexedDB clean function
+                var product_id_match = !item.product_id || item.product_id === self_product_id;
+                var product_tmpl_match = !item.product_tmpl_id || item.product_tmpl_id === self_tmpl_id;
+                var categ_match = !item.categ_id || item.categ_id === self_cat_id;
+                var date_start_match = !item.date_start || moment(item.date_start).isSameOrBefore(date);
+                var date_end_match = !item.date_end || moment(item.date_end).isSameOrAfter(date);
+                
+                var matches = product_id_match && product_tmpl_match && categ_match && date_start_match && date_end_match;
+                
+                console.log(`Checking item ${item.id}:`, {
+                    applied_on: item.applied_on,
+                    item_product_id: item.product_id,
+                    item_tmpl_id: item.product_tmpl_id,
+                    item_cat_id: item.categ_id,
+                    self_product_id: self_product_id,
+                    self_tmpl_id: self_tmpl_id,
+                    self_cat_id: self_cat_id,
+                    product_id_match: product_id_match,
+                    product_tmpl_match: product_tmpl_match,
+                    categ_match: categ_match,
+                    matches: matches
+                });
+                
+                return matches;
             });
+            
+            console.log(`Found ${items.length} matching pricelist items`);
+        } else {
+            console.log('No pricelist items available in memory');
         }
 
         // Apply pricelist rules
@@ -832,16 +936,24 @@ models.Product = models.Product.extend({
             });
 
             var item = items[0];
+            console.log(`Applying pricelist item ${item.id}, compute_price: ${item.compute_price}`);
+            
             if (item.compute_price === 'fixed') {
                 price = item.fixed_price;
+                console.log(`Fixed price: ${price}`);
             } else if (item.compute_price === 'percentage') {
                 price = this.lst_price - (this.lst_price * (item.percent_price / 100));
+                console.log(`Percentage price: ${price} (${item.percent_price}% off ${this.lst_price})`);
             } else if (item.compute_price === 'formula') {
                 var base_price = this.lst_price;
                 price = base_price * (1 + item.price_surcharge / 100) + item.price_discount;
+                console.log(`Formula price: ${price}`);
             }
+        } else {
+            console.log(`No matching items, using lst_price: ${price}`);
         }
 
+        console.log(`Final price for product ${this.id}: ${price}`);
         return price;
     },
 

@@ -368,12 +368,21 @@ const SyncService = Class.extend({
      * Non-blocking: fetches metadata first, then processes in background
      */
     sync_delta_updates: async function() {
+        // Prevent parallel delta syncs
+        if (this.delta_sync_in_progress) {
+            console.log('⏸️ Delta sync already in progress, skipping...');
+            return false;
+        }
+        
+        this.delta_sync_in_progress = true;
+        
         try {
             console.log('=== Starting Delta Sync ===');
 
             // Check if delta sync is enabled
             if (!this.pos.config.enable_delta_sync) {
                 console.log('Delta sync is disabled');
+                this.delta_sync_in_progress = false;
                 return true;
             }
 
@@ -399,37 +408,37 @@ const SyncService = Class.extend({
 
             const total_products = count_result.product_count || 0;
             const total_partners = count_result.partner_count || 0;
+            const total_pricelist_items = count_result.pricelist_item_count || 0;
 
-            if (total_products === 0 && total_partners === 0) {
+            if (total_products === 0 && total_partners === 0 && total_pricelist_items === 0) {
                 console.log('No updates available');
                 await this.db.set_sync_metadata('last_delta_sync', count_result.sync_timestamp);
                 return true;
             }
 
-            console.log(`Found ${total_products} products and ${total_partners} partners to sync`);
+            console.log(`Found ${total_products} products, ${total_partners} partners, and ${total_pricelist_items} pricelist items to sync`);
 
             // Trigger delta sync started event
             this.trigger('delta-sync-started', {
                 products: total_products,
-                partners: total_partners
+                partners: total_partners,
+                pricelist_items: total_pricelist_items
             });
 
-            // Process partners immediately (usually small amount)
+            // Process partners in background (non-blocking)
             if (total_partners > 0) {
-                const partners = await rpc.query({
-                    route: '/pos/get_updates_partners',
-                    params: {
-                        session_id: this.pos.pos_session.id,
-                        last_write_date: last_sync
-                    }
-                });
+                console.log(`Starting background fetch of ${total_partners} partners...`);
+                this._fetch_partners_background(last_sync);
+            }
 
-                if (partners && partners.length > 0) {
-                    console.log(`Processing ${partners.length} partners...`);
-                    await this.db.save_partners_to_indexeddb(partners);
-                    this.pos.db.add_partners(partners);
-                    console.log(`✓ Updated ${partners.length} partners`);
-                }
+            // Process pricelist items in background (non-blocking)
+            if (total_pricelist_items > 0) {
+                console.log(`Starting background fetch of ${total_pricelist_items} pricelist items...`);
+                this._fetch_pricelist_items_background(last_sync, total_pricelist_items);
+            } else if (!last_sync) {
+                // First sync - load pricelist items in background
+                console.log('First sync detected - loading pricelist items in background...');
+                this._fetch_initial_pricelist_items_background();
             }
 
             // Process products in background batches (non-blocking)
@@ -446,14 +455,17 @@ const SyncService = Class.extend({
             // Log sync
             await this.db.add_sync_log('delta_sync', 'Delta sync started', {
                 products: total_products,
-                partners: total_partners
+                partners: total_partners,
+                pricelist_items: total_pricelist_items
             });
 
             console.log('=== Delta Sync Initiated (running in background) ===');
+            this.delta_sync_in_progress = false;
             return true;
 
         } catch (error) {
             console.error('Delta sync error:', error);
+            this.delta_sync_in_progress = false;
             
             // Sanitize error for IndexedDB storage
             const error_info = {
@@ -503,6 +515,14 @@ const SyncService = Class.extend({
      * Fetch products from server in batches
      */
     _fetch_delta_products_in_batches: async function(last_sync, total_count) {
+        // Prevent parallel product fetching
+        if (this.product_fetch_in_progress) {
+            console.log('⏸️ Product fetch already in progress, skipping...');
+            return 0;
+        }
+        
+        this.product_fetch_in_progress = true;
+        
         const batch_size = 500;
         let processed = 0;
         
@@ -562,13 +582,19 @@ const SyncService = Class.extend({
                     await this.db.save_products_to_indexeddb(clean_products);
                     console.log(`✓ Saved ${clean_products.length} products to IndexedDB`);
                     
-                    // Convert to Product model instances for POS memory
-                    const product_models = this._convert_to_product_models(products);
-                    console.log(`✓ Converted ${product_models.length} products to models`);
-                    
-                    // Add Product instances to POS memory
-                    this.pos.db.add_products(product_models);
-                    console.log(`✓ Added ${product_models.length} products to POS memory`);
+                    // Only add to POS memory if NOT in lazy mode
+                    const sync_method = (this.pos.config && this.pos.config.sync_method) || 'normal';
+                    if (sync_method !== 'lazy') {
+                        // Convert to Product model instances for POS memory
+                        const product_models = this._convert_to_product_models(products);
+                        console.log(`✓ Converted ${product_models.length} products to models`);
+                        
+                        // Add Product instances to POS memory
+                        this.pos.db.add_products(product_models);
+                        console.log(`✓ Added ${product_models.length} products to POS memory`);
+                    } else {
+                        console.log(`⚡ Lazy mode: Products saved to IndexedDB only (not loaded to memory)`);
+                    }
                     
                     processed += products.length;
                     const progress_percent = Math.round(processed/total_count*100);
@@ -584,9 +610,6 @@ const SyncService = Class.extend({
                     console.warn(`⚠️ No products returned from server for offset ${offset}`);
                 }
                 
-                // Small delay between batches
-                await new Promise(resolve => setTimeout(resolve, 100));
-                
                 // If less than batch size, we're done
                 if (!products || products.length < batch_size) {
                     break;
@@ -594,11 +617,515 @@ const SyncService = Class.extend({
             }
             
             console.log(`✅ Fetch complete: ${processed} products processed`);
+            
+            // Check for deleted products after processing updates
+            console.log('🔄 Checking for deleted products...');
+            await this._remove_deleted_products();
+            
+            this.product_fetch_in_progress = false;
             return processed;
             
         } catch (error) {
             console.error('Error fetching delta products:', error);
+            this.product_fetch_in_progress = false;
             throw error;
+        }
+    },
+
+    /**
+     * Fetch pricelist items from server in batches
+     */
+    _fetch_pricelist_items_in_batches: async function(last_sync, total_count) {
+        // Prevent parallel pricelist fetching
+        if (this.pricelist_fetch_in_progress) {
+            console.log('⏸️ Pricelist fetch already in progress, skipping...');
+            return 0;
+        }
+        
+        this.pricelist_fetch_in_progress = true;
+        
+        const batch_size = 500;
+        let processed = 0;
+        
+        console.log(`📥 Fetching pricelist items updated after: ${last_sync}`);
+        
+        try {
+            // Fetch in batches
+            for (let offset = 0; offset < total_count; offset += batch_size) {
+                console.log(`Requesting pricelist items batch: offset=${offset}, limit=${batch_size}`);
+                
+                const items = await rpc.query({
+                    route: '/pos/get_updates_pricelist_items',
+                    params: {
+                        session_id: this.pos.pos_session.id,
+                        last_write_date: last_sync,
+                        limit: batch_size,
+                        offset: offset
+                    }
+                });
+
+                console.log(`Server returned ${items ? items.length : 0} pricelist items`);
+                
+                if (items && items.length > 0) {
+                    // Clean items for IndexedDB and memory
+                    const clean_items = items.map(item => ({
+                        id: item.id,
+                        pricelist_id: Array.isArray(item.pricelist_id) ? item.pricelist_id[0] : item.pricelist_id,
+                        product_tmpl_id: item.product_tmpl_id ? (Array.isArray(item.product_tmpl_id) ? item.product_tmpl_id[0] : item.product_tmpl_id) : false,
+                        product_id: item.product_id ? (Array.isArray(item.product_id) ? item.product_id[0] : item.product_id) : false,
+                        categ_id: item.categ_id ? (Array.isArray(item.categ_id) ? item.categ_id[0] : item.categ_id) : false,
+                        min_quantity: item.min_quantity || 0,
+                        applied_on: item.applied_on,
+                        base: item.base,
+                        base_pricelist_id: item.base_pricelist_id ? (Array.isArray(item.base_pricelist_id) ? item.base_pricelist_id[0] : item.base_pricelist_id) : false,
+                        compute_price: item.compute_price,
+                        fixed_price: item.fixed_price || 0,
+                        percent_price: item.percent_price || 0,
+                        price_discount: item.price_discount || 0,
+                        price_surcharge: item.price_surcharge || 0,
+                        price_round: item.price_round || 0,
+                        price_min_margin: item.price_min_margin || 0,
+                        price_max_margin: item.price_max_margin || 0,
+                        company_id: item.company_id ? (Array.isArray(item.company_id) ? item.company_id[0] : item.company_id) : false,
+                        currency_id: item.currency_id ? (Array.isArray(item.currency_id) ? item.currency_id[0] : item.currency_id) : false,
+                        date_start: item.date_start || false,
+                        date_end: item.date_end || false,
+                        write_date: item.write_date
+                    }));
+                    
+                    // Save cleaned items to IndexedDB
+                    await this.db.save_pricelist_items_to_indexeddb(clean_items);
+                    console.log(`✓ Saved ${clean_items.length} pricelist items to IndexedDB`);
+                    
+                    // Add cleaned items to POS memory
+                    if (this.pos.pricelists) {
+                        clean_items.forEach(item => {
+                            const pricelist = this.pos.pricelists.find(pl => pl.id === item.pricelist_id);
+                            if (pricelist) {
+                                if (!pricelist.items) pricelist.items = [];
+                                // Update or add item
+                                const existing_idx = pricelist.items.findIndex(i => i.id === item.id);
+                                if (existing_idx >= 0) {
+                                    pricelist.items[existing_idx] = item;
+                                } else {
+                                    pricelist.items.push(item);
+                                }
+                            }
+                        });
+                    }
+                    
+                    processed += items.length;
+                    console.log(`📦 Pricelist items fetched: ${processed}/${total_count}`);
+                } else {
+                    console.warn(`⚠️ No pricelist items returned for offset ${offset}`);
+                }
+                
+                // If less than batch size, we're done
+                if (!items || items.length < batch_size) {
+                    break;
+                }
+            }
+            
+            console.log(`✅ Pricelist items fetch complete: ${processed} items processed`);
+            
+            // Check for deleted items on every sync (very lightweight now)
+            console.log('🔄 Triggering deletion sync check...');
+            await this._remove_deleted_pricelist_items();
+            
+            this.pricelist_fetch_in_progress = false;
+            return processed;
+            
+        } catch (error) {
+            console.error('Error fetching pricelist items:', error);
+            this.pricelist_fetch_in_progress = false;
+            throw error;
+        }
+    },
+
+    /**
+     * Fetch partners in background (non-blocking)
+     */
+    _fetch_partners_background: function(last_sync) {
+        const self = this;
+        
+        console.log('🔄 Starting background partners sync...');
+        
+        setTimeout(async function() {
+            try {
+                const partners = await rpc.query({
+                    route: '/pos/get_updates_partners',
+                    params: {
+                        session_id: self.pos.pos_session.id,
+                        last_write_date: last_sync
+                    }
+                });
+
+                if (partners && partners.length > 0) {
+                    console.log(`Processing ${partners.length} partners...`);
+                    await self.db.save_partners_to_indexeddb(partners);
+                    self.pos.db.add_partners(partners);
+                    console.log(`✓ Updated ${partners.length} partners`);
+                }
+                
+                // Check for deleted partners
+                console.log('🔄 Checking for deleted partners...');
+                await self._remove_deleted_partners();
+                
+                console.log(`✅ Background partners sync complete`);
+            } catch (error) {
+                console.error('Background partners sync error:', error);
+            }
+        }, 500);
+    },
+
+    /**
+     * Fetch pricelist items in background (non-blocking)
+     */
+    _fetch_pricelist_items_background: function(last_sync, total_count) {
+        const self = this;
+        
+        console.log('🔄 Starting background pricelist items sync...');
+        
+        // Run after a short delay to let UI load
+        setTimeout(function() {
+            self._fetch_pricelist_items_in_batches(last_sync, total_count)
+                .then(function(count) {
+                    console.log(`✅ Background pricelist sync complete: ${count} items synced`);
+                })
+                .catch(function(error) {
+                    console.error('Background pricelist sync error:', error);
+                });
+        }, 500);
+    },
+
+    /**
+     * Fetch initial pricelist items in background (first sync)
+     */
+    _fetch_initial_pricelist_items_background: function() {
+        const self = this;
+        
+        console.log('🔄 Starting initial pricelist items load in background...');
+        
+        setTimeout(async function() {
+            try {
+                const all_items_result = await rpc.query({
+                    route: '/pos/get_updates_pricelist_items',
+                    params: {
+                        session_id: self.pos.pos_session.id,
+                        last_write_date: null,  // Get all items
+                        limit: 1000,
+                        offset: 0
+                    }
+                });
+                
+                if (all_items_result && all_items_result.length > 0) {
+                    console.log(`Loading ${all_items_result.length} initial pricelist items...`);
+                    
+                    // Clean items before saving
+                    const clean_items = all_items_result.map(item => ({
+                        id: item.id,
+                        pricelist_id: Array.isArray(item.pricelist_id) ? item.pricelist_id[0] : item.pricelist_id,
+                        product_tmpl_id: item.product_tmpl_id ? (Array.isArray(item.product_tmpl_id) ? item.product_tmpl_id[0] : item.product_tmpl_id) : false,
+                        product_id: item.product_id ? (Array.isArray(item.product_id) ? item.product_id[0] : item.product_id) : false,
+                        categ_id: item.categ_id ? (Array.isArray(item.categ_id) ? item.categ_id[0] : item.categ_id) : false,
+                        min_quantity: item.min_quantity || 0,
+                        applied_on: item.applied_on,
+                        base: item.base,
+                        base_pricelist_id: item.base_pricelist_id ? (Array.isArray(item.base_pricelist_id) ? item.base_pricelist_id[0] : item.base_pricelist_id) : false,
+                        compute_price: item.compute_price,
+                        fixed_price: item.fixed_price || 0,
+                        percent_price: item.percent_price || 0,
+                        price_discount: item.price_discount || 0,
+                        price_surcharge: item.price_surcharge || 0,
+                        price_round: item.price_round || 0,
+                        price_min_margin: item.price_min_margin || 0,
+                        price_max_margin: item.price_max_margin || 0,
+                        company_id: item.company_id ? (Array.isArray(item.company_id) ? item.company_id[0] : item.company_id) : false,
+                        currency_id: item.currency_id ? (Array.isArray(item.currency_id) ? item.currency_id[0] : item.currency_id) : false,
+                        date_start: item.date_start || false,
+                        date_end: item.date_end || false,
+                        write_date: item.write_date
+                    }));
+                    
+                    await self.db.save_pricelist_items_to_indexeddb(clean_items);
+                    
+                    // Add to memory
+                    if (self.pos.pricelists) {
+                        clean_items.forEach(item => {
+                            const pricelist = self.pos.pricelists.find(pl => pl.id === item.pricelist_id);
+                            if (pricelist) {
+                                if (!pricelist.items) pricelist.items = [];
+                                pricelist.items.push(item);
+                            }
+                        });
+                    }
+                    
+                    console.log(`✅ Loaded ${clean_items.length} initial pricelist items in background`);
+                }
+            } catch (error) {
+                console.error('Error loading initial pricelist items:', error);
+            }
+        }, 500);
+    },
+
+    /**
+     * Remove pricelist items that were deleted on server
+     * Uses deletion tracking table - very efficient
+     */
+    _remove_deleted_pricelist_items: async function() {
+        try {
+            // Get last deletion check timestamp
+            const last_check = await this.db.get_sync_metadata('last_deletion_check_pricelist_items');
+            
+            // Only check deletions once per minute
+            if (last_check) {
+                const last_check_time = new Date(last_check);
+                const now = new Date();
+                const minutes_since_check = (now - last_check_time) / (1000 * 60);
+                
+                if (minutes_since_check < 1) {
+                    console.log(`⏸️ Pricelist deletion check skipped - last check was ${Math.round(minutes_since_check * 60)} seconds ago`);
+                    return;
+                }
+            }
+            
+            console.log('═══════════════════════════════════════════════════');
+            console.log('🗑️  STARTING DELETION SYNC FOR PRICELIST ITEMS');
+            console.log('═══════════════════════════════════════════════════');
+            const since_timestamp = last_check || '2000-01-01 00:00:00';
+            
+            console.log(`📅 Last deletion check: ${last_check || 'NEVER'}`);
+            console.log(`📅 Checking deletions since: ${since_timestamp}`);
+            console.log(`📡 Calling server route: /pos/get_deleted_pricelist_items`);
+            console.log(`📋 Session ID: ${this.pos.pos_session.id}`);
+            
+            // Get deleted item IDs from server (only records deleted since last check)
+            const deleted_ids = await rpc.query({
+                route: '/pos/get_deleted_pricelist_items',
+                params: {
+                    session_id: this.pos.pos_session.id,
+                    since_timestamp: since_timestamp
+                }
+            });
+            
+            console.log(`📬 Server response:`, deleted_ids);
+            
+            if (!deleted_ids || !Array.isArray(deleted_ids)) {
+                console.warn('⚠️  Failed to get deleted pricelist item IDs (not an array)');
+                console.log('═══════════════════════════════════════════════════');
+                return;
+            }
+            
+            console.log(`📊 Found ${deleted_ids.length} deleted pricelist items`);
+            
+            if (deleted_ids.length > 0) {
+                console.log(`🗑️  Deleted item IDs:`, deleted_ids);
+                console.log(`💾 Removing from IndexedDB...`);
+                
+                // Remove from IndexedDB
+                const deleted_from_db = await this.db.delete_pricelist_items_from_indexeddb(deleted_ids);
+                console.log(`✓ Removed ${deleted_from_db} items from IndexedDB`);
+                
+                // Remove from memory
+                console.log(`🧠 Removing from POS memory...`);
+                let removed_from_memory = 0;
+                if (this.pos.pricelists) {
+                    this.pos.pricelists.forEach(pricelist => {
+                        if (pricelist.items) {
+                            const before_count = pricelist.items.length;
+                            pricelist.items = pricelist.items.filter(item => !deleted_ids.includes(item.id));
+                            const after_count = pricelist.items.length;
+                            removed_from_memory += (before_count - after_count);
+                            if (before_count !== after_count) {
+                                console.log(`  - Pricelist "${pricelist.name}": ${before_count - after_count} items removed`);
+                            }
+                        }
+                    });
+                }
+                console.log(`✓ Removed ${removed_from_memory} items from memory`);
+                
+                console.log(`✅ Successfully removed ${deleted_ids.length} deleted pricelist items`);
+            } else {
+                console.log('✓ No deleted items found (all in sync)');
+            }
+            
+            // Update last check timestamp
+            const now = moment().format('YYYY-MM-DD HH:mm:ss');
+            console.log(`💾 Updating last deletion check timestamp to: ${now}`);
+            await this.db.set_sync_metadata('last_deletion_check_pricelist_items', now);
+            
+            console.log('═══════════════════════════════════════════════════');
+            console.log('✅ DELETION SYNC COMPLETED SUCCESSFULLY');
+            console.log('═══════════════════════════════════════════════════');
+            
+        } catch (error) {
+            console.error('═══════════════════════════════════════════════════');
+            console.error('❌ ERROR IN DELETION SYNC:', error);
+            console.error('Stack trace:', error.stack);
+            console.error('═══════════════════════════════════════════════════');
+        }
+    },
+
+    /**
+     * Remove products that were deleted on server
+     */
+    _remove_deleted_products: async function() {
+        try {
+            // Get last deletion check timestamp
+            const last_check = await this.db.get_sync_metadata('last_deletion_check_products');
+            
+            // Only check deletions once per minute
+            if (last_check) {
+                const last_check_time = new Date(last_check);
+                const now = new Date();
+                const minutes_since_check = (now - last_check_time) / (1000 * 60);
+                
+                if (minutes_since_check < 1) {
+                    console.log(`⏸️ Product deletion check skipped - last check was ${Math.round(minutes_since_check * 60)} seconds ago`);
+                    return;
+                }
+            }
+            
+            console.log('═══════════════════════════════════════════════════');
+            console.log('🗑️  STARTING DELETION SYNC FOR PRODUCTS');
+            console.log('═══════════════════════════════════════════════════');
+            const since_timestamp = last_check || '2000-01-01 00:00:00';
+            
+            console.log(`📅 Last deletion check: ${last_check || 'NEVER'}`);
+            console.log(`📅 Checking deletions since: ${since_timestamp}`);
+            
+            const deleted_ids = await rpc.query({
+                route: '/pos/get_deleted_products',
+                params: {
+                    session_id: this.pos.pos_session.id,
+                    since_timestamp: since_timestamp
+                }
+            });
+            
+            console.log(`📬 Server response:`, deleted_ids);
+            
+            if (!deleted_ids || !Array.isArray(deleted_ids)) {
+                console.warn('⚠️  Failed to get deleted product IDs');
+                console.log('═══════════════════════════════════════════════════');
+                return;
+            }
+            
+            console.log(`📊 Found ${deleted_ids.length} deleted products`);
+            
+            if (deleted_ids.length > 0) {
+                console.log(`🗑️  Deleted product IDs:`, deleted_ids);
+                
+                // Remove from IndexedDB
+                const deleted_from_db = await this.db.delete_products_from_indexeddb(deleted_ids);
+                console.log(`✓ Removed ${deleted_from_db} products from IndexedDB`);
+                
+                // Remove from POS memory
+                deleted_ids.forEach(id => {
+                    const product = this.pos.db.get_product_by_id(id);
+                    if (product) {
+                        // Remove from various indexes
+                        delete this.pos.db.product_by_id[id];
+                        if (product.barcode) {
+                            delete this.pos.db.product_by_barcode[product.barcode];
+                        }
+                    }
+                });
+                console.log(`✓ Removed ${deleted_ids.length} products from memory`);
+                
+                console.log(`✅ Successfully removed ${deleted_ids.length} deleted products`);
+            } else {
+                console.log('✓ No deleted products found');
+            }
+            
+            const now = moment().format('YYYY-MM-DD HH:mm:ss');
+            await this.db.set_sync_metadata('last_deletion_check_products', now);
+            
+            console.log('═══════════════════════════════════════════════════');
+            console.log('✅ PRODUCT DELETION SYNC COMPLETED');
+            console.log('═══════════════════════════════════════════════════');
+            
+        } catch (error) {
+            console.error('═══════════════════════════════════════════════════');
+            console.error('❌ ERROR IN PRODUCT DELETION SYNC:', error);
+            console.error('═══════════════════════════════════════════════════');
+        }
+    },
+
+    /**
+     * Remove partners that were deleted on server
+     */
+    _remove_deleted_partners: async function() {
+        try {
+            // Get last deletion check timestamp
+            const last_check = await this.db.get_sync_metadata('last_deletion_check_partners');
+            
+            // Only check deletions once per minute
+            if (last_check) {
+                const last_check_time = new Date(last_check);
+                const now = new Date();
+                const minutes_since_check = (now - last_check_time) / (1000 * 60);
+                
+                if (minutes_since_check < 1) {
+                    console.log(`⏸️ Partner deletion check skipped - last check was ${Math.round(minutes_since_check * 60)} seconds ago`);
+                    return;
+                }
+            }
+            
+            console.log('═══════════════════════════════════════════════════');
+            console.log('🗑️  STARTING DELETION SYNC FOR PARTNERS');
+            console.log('═══════════════════════════════════════════════════');
+            const since_timestamp = last_check || '2000-01-01 00:00:00';
+            
+            console.log(`📅 Last deletion check: ${last_check || 'NEVER'}`);
+            console.log(`📅 Checking deletions since: ${since_timestamp}`);
+            
+            const deleted_ids = await rpc.query({
+                route: '/pos/get_deleted_partners',
+                params: {
+                    session_id: this.pos.pos_session.id,
+                    since_timestamp: since_timestamp
+                }
+            });
+            
+            console.log(`📬 Server response:`, deleted_ids);
+            
+            if (!deleted_ids || !Array.isArray(deleted_ids)) {
+                console.warn('⚠️  Failed to get deleted partner IDs');
+                console.log('═══════════════════════════════════════════════════');
+                return;
+            }
+            
+            console.log(`📊 Found ${deleted_ids.length} deleted partners`);
+            
+            if (deleted_ids.length > 0) {
+                console.log(`🗑️  Deleted partner IDs:`, deleted_ids);
+                
+                // Remove from IndexedDB
+                const deleted_from_db = await this.db.delete_partners_from_indexeddb(deleted_ids);
+                console.log(`✓ Removed ${deleted_from_db} partners from IndexedDB`);
+                
+                // Remove from POS memory
+                deleted_ids.forEach(id => {
+                    delete this.pos.db.partner_by_id[id];
+                });
+                console.log(`✓ Removed ${deleted_ids.length} partners from memory`);
+                
+                console.log(`✅ Successfully removed ${deleted_ids.length} deleted partners`);
+            } else {
+                console.log('✓ No deleted partners found');
+            }
+            
+            const now = moment().format('YYYY-MM-DD HH:mm:ss');
+            await this.db.set_sync_metadata('last_deletion_check_partners', now);
+            
+            console.log('═══════════════════════════════════════════════════');
+            console.log('✅ PARTNER DELETION SYNC COMPLETED');
+            console.log('═══════════════════════════════════════════════════');
+            
+        } catch (error) {
+            console.error('═══════════════════════════════════════════════════');
+            console.error('❌ ERROR IN PARTNER DELETION SYNC:', error);
+            console.error('═══════════════════════════════════════════════════');
         }
     },
 

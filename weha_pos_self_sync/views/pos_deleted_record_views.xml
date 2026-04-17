@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Tree View -->
+        <record id="view_pos_deleted_record_tree" model="ir.ui.view">
+            <field name="name">pos.deleted.record.tree</field>
+            <field name="model">pos.deleted.record</field>
+            <field name="arch" type="xml">
+                <tree string="Deleted Records" create="false" edit="false">
+                    <field name="deletion_date"/>
+                    <field name="model_name"/>
+                    <field name="record_id"/>
+                    <field name="config_ids" widget="many2many_tags"/>
+                </tree>
+            </field>
+        </record>
+
+        <!-- Form View -->
+        <record id="view_pos_deleted_record_form" model="ir.ui.view">
+            <field name="name">pos.deleted.record.form</field>
+            <field name="model">pos.deleted.record</field>
+            <field name="arch" type="xml">
+                <form string="Deleted Record" create="false" edit="false">
+                    <sheet>
+                        <group>
+                            <group>
+                                <field name="model_name"/>
+                                <field name="record_id"/>
+                            </group>
+                            <group>
+                                <field name="deletion_date"/>
+                                <field name="config_ids" widget="many2many_tags"/>
+                            </group>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <!-- Search View -->
+        <record id="view_pos_deleted_record_search" model="ir.ui.view">
+            <field name="name">pos.deleted.record.search</field>
+            <field name="model">pos.deleted.record</field>
+            <field name="arch" type="xml">
+                <search string="Deleted Records">
+                    <field name="model_name"/>
+                    <field name="record_id"/>
+                    <field name="deletion_date"/>
+                    <field name="config_ids"/>
+                    <filter string="Today" name="today" 
+                            domain="[('deletion_date', '&gt;=', datetime.datetime.combine(context_today(), datetime.time(0,0,0))),
+                                     ('deletion_date', '&lt;=', datetime.datetime.combine(context_today(), datetime.time(23,59,59)))]"/>
+                    <filter string="Last 7 Days" name="week" 
+                            domain="[('deletion_date', '&gt;=', (context_today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'))]"/>
+                    <filter string="Last 30 Days" name="month" 
+                            domain="[('deletion_date', '&gt;=', (context_today() - datetime.timedelta(days=30)).strftime('%Y-%m-%d'))]"/>
+                    <group expand="0" string="Group By">
+                        <filter string="Model" name="group_model" context="{'group_by': 'model_name'}"/>
+                        <filter string="Deletion Date" name="group_date" context="{'group_by': 'deletion_date:day'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+
+        <!-- Action -->
+        <record id="action_pos_deleted_record" model="ir.actions.act_window">
+            <field name="name">POS Deleted Records</field>
+            <field name="res_model">pos.deleted.record</field>
+            <field name="view_mode">tree,form</field>
+            <field name="context">{'search_default_month': 1}</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">
+                    No deleted records tracked yet
+                </p>
+                <p>
+                    This view shows records that have been deleted from the system
+                    and need to be removed from POS clients during synchronization.
+                </p>
+            </field>
+        </record>
+
+        <!-- Menu under Reporting -->
+        <menuitem id="menu_pos_deleted_record"
+                  name="Deleted Records"
+                  parent="point_of_sale.menu_point_rep"
+                  action="action_pos_deleted_record"
+                  sequence="100"/>
+    </data>
+</odoo>
