@@ -334,29 +334,6 @@ ProductScreenWidget.include({
             }
         }
     },
-    
-    /**
-     * Override barcode scan to support on-demand loading
-     */
-    barcode_product_action: async function(code) {
-        const sync_method = this.pos.config && this.pos.config.sync_method;
-        
-        if (sync_method === 'lazy' || sync_method === 'hybrid') {
-            // Try to get product from cache or server
-            console.log(`🔍 Scanning barcode: ${code.base_code}`);
-            
-            var product = await this.pos.get_product_by_barcode(code.base_code);
-            
-            if (product) {
-                console.log(`✓ Product found: ${product.display_name}`);
-                // Refresh UI to show the product
-                this.product_list_widget.renderElement();
-            }
-        }
-        
-        // Call parent to handle the barcode
-        return this._super(code);
-    },
 });
 
 // Add sync status widget to Chrome

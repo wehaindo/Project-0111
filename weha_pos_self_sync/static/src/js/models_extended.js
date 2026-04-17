@@ -10,6 +10,7 @@ const rpc = require('web.rpc');
 
 // Store original load_server_data
 const _super_posmodel = models.PosModel.prototype;
+const _super_load_server_data = _super_posmodel.load_server_data;
 
 models.PosModel = models.PosModel.extend({
     /**
@@ -21,11 +22,28 @@ models.PosModel = models.PosModel.extend({
     async load_server_data() {
         const self = this;
         
-        // Check mode BEFORE calling parent to prevent product loading
-        // We need to check config early, but config is loaded in parent
-        // So we'll temporarily call parent, check mode, then clear products if needed
+        // FIRST: Load config and other data (but not products yet)
+        // We need to intercept product loading before parent loads them
+        const original_models = models.PosModel.prototype.models;
+        let product_model_backup = null;
         
-        await _super_posmodel.load_server_data.call(this);
+        // Temporarily remove product.product from models list
+        const models_to_load = original_models.filter(function(model) {
+            if (model.model === 'product.product') {
+                product_model_backup = model;
+                return false; // Skip product loading for now
+            }
+            return true;
+        });
+        
+        // Swap models temporarily
+        models.PosModel.prototype.models = models_to_load;
+        
+        // Call parent to load everything EXCEPT products
+        await _super_load_server_data.call(this);
+        
+        // Restore original models list
+        models.PosModel.prototype.models = original_models;
         
         // Initialize IndexedDB after config is loaded
         if (this.db && this.db.init_indexed_db) {
@@ -39,8 +57,13 @@ models.PosModel = models.PosModel.extend({
         console.log(`📦 Loading mode: ${sync_method} (Hybrid Sync: ${hybrid_sync_enabled})`);
 
         if (!hybrid_sync_enabled || sync_method === 'normal') {
-            // MODE 1: Normal POS - use standard Odoo loading (already loaded by parent)
-            console.log('✓ Using standard Odoo product loading');
+            // MODE 1: Normal POS - load all products using standard method
+            console.log('✓ Loading all products (normal mode)...');
+            
+            if (product_model_backup) {
+                // Load products using the original model definition
+                await this.load_server_data_model(product_model_backup);
+            }
             
             // Ensure all products are proper model instances
             var products_list = [];
@@ -61,14 +84,16 @@ models.PosModel = models.PosModel.extend({
                 this.db.add_products(products_list);
             }
             
+            console.log(`✓ Loaded ${Object.keys(this.db.product_by_id).length} products`);
             return true;
         }
         
         if (sync_method === 'lazy') {
-            // MODE 2: Lazy Load - ZERO products at startup
-            console.log('🚀 Lazy Load Mode: Clearing pre-loaded products...');
+            // MODE 2: Lazy Load - ZERO products at startup (skip product loading entirely)
+            console.log('🚀 Lazy Load Mode: Skipping product load - will load on-demand only');
             
-            // Clear products that were loaded by parent
+            // DO NOT load products at all
+            // Just initialize empty product storage
             this.db.product_by_id = {};
             this.db.product_by_barcode = {};
             this.db.product_by_category_id = {};
@@ -76,20 +101,20 @@ models.PosModel = models.PosModel.extend({
                 this.db.product_search_string = {};
             }
             
-            console.log('✓ Products cleared - will load on-demand only');
+            console.log('✓ Product loading skipped - products will load on search/scan');
             
-            // Keep partners
+            // Load partners
             await this._load_partners_from_cache();
             
             return true;
         }
         
         if (sync_method === 'hybrid') {
-            // MODE 3: Hybrid - Load initial batch
+            // MODE 3: Hybrid - Load initial batch only
             const limit = (this.config && this.config.initial_product_limit) || 100;
-            console.log(`🔄 Hybrid Mode: Replacing full load with ${limit} initial products`);
+            console.log(`🔄 Hybrid Mode: Loading only ${limit} initial products`);
             
-            // Clear all products first
+            // Initialize empty product storage
             this.db.product_by_id = {};
             this.db.product_by_barcode = {};
             this.db.product_by_category_id = {};
@@ -107,6 +132,15 @@ models.PosModel = models.PosModel.extend({
         }
 
         return true;
+    },
+    
+    /**
+     * Load a single model from server (helper for normal mode)
+     */
+    load_server_data_model: async function(model_obj) {
+        const self = this;
+        const loaded = await this.load_model(model_obj);
+        return loaded;
     },
 
     /**
@@ -566,6 +600,58 @@ models.PosModel = models.PosModel.extend({
         
         return undefined;
     },
+
+    /**
+     * Override scan_product to support lazy/hybrid loading from IndexedDB
+     */
+    scan_product: async function(parsed_code) {
+        const sync_method = (this.config && this.config.sync_method) || 'normal';
+        
+        // For lazy/hybrid modes, try IndexedDB first
+        if (sync_method === 'lazy' || sync_method === 'hybrid') {
+            console.log(`🔍 Scanning barcode (${sync_method} mode): ${parsed_code.code}`);
+            
+            // First check memory
+            var product = this.db.get_product_by_barcode(parsed_code.code);
+            
+            if (!product) {
+                // Not in memory, check IndexedDB and server
+                product = await this.get_product_by_barcode(parsed_code.code);
+            }
+            
+            if (product) {
+                console.log(`✓ Product found: ${product.display_name}`);
+                
+                // If parent method exists, call it with the product
+                if (_super_posmodel.scan_product) {
+                    return _super_posmodel.scan_product.call(this, parsed_code);
+                }
+                
+                // Otherwise handle directly
+                if (parsed_code.type === 'price') {
+                    this.get_order().add_product(product, {price: parsed_code.value});
+                } else if (parsed_code.type === 'weight') {
+                    this.get_order().add_product(product, {quantity: parsed_code.value, merge: false});
+                } else if (parsed_code.type === 'discount') {
+                    this.get_order().add_product(product, {discount: parsed_code.value, merge: false});
+                } else {
+                    this.get_order().add_product(product);
+                }
+                
+                return true;
+            } else {
+                console.warn(`⚠ Product not found for barcode: ${parsed_code.code}`);
+                return false;
+            }
+        }
+        
+        // Normal mode - use parent method
+        if (_super_posmodel.scan_product) {
+            return _super_posmodel.scan_product.call(this, parsed_code);
+        }
+        
+        return false;
+    },
 });
 
 // Extend Order model to add UUID
@@ -597,6 +683,88 @@ models.Order = models.Order.extend({
             return v.toString(16);
         });
     },
+});
+
+// Extend Product model to ensure get_display_price and get_price methods exist
+const _super_product = models.Product.prototype;
+
+models.Product = models.Product.extend({
+    /**
+     * Get product price with pricelist applied
+     */
+    get_price: function(pricelist, quantity) {
+        var self = this;
+        var date = moment().startOf('day');
+        
+        // If no pricelist, return standard price
+        if (!pricelist) {
+            return this.lst_price || 0;
+        }
+
+        // Find matching pricelist item
+        var price = this.lst_price || 0;
+        var items = [];
+        
+        // Get pricelist items for this product
+        if (pricelist.items) {
+            items = _.filter(pricelist.items, function(item) {
+                return (!item.product_id || item.product_id[0] === self.id) &&
+                       (!item.product_tmpl_id || item.product_tmpl_id[0] === self.product_tmpl_id[0]) &&
+                       (!item.categ_id || item.categ_id[0] === self.categ_id[0]) &&
+                       (!item.date_start || moment(item.date_start).isSameOrBefore(date)) &&
+                       (!item.date_end || moment(item.date_end).isSameOrAfter(date));
+            });
+        }
+
+        // Apply pricelist rules
+        if (items.length > 0) {
+            // Sort by specificity (product > template > category)
+            items = _.sortBy(items, function(item) {
+                if (item.product_id) return 0;
+                if (item.product_tmpl_id) return 1;
+                if (item.categ_id) return 2;
+                return 3;
+            });
+
+            var item = items[0];
+            if (item.compute_price === 'fixed') {
+                price = item.fixed_price;
+            } else if (item.compute_price === 'percentage') {
+                price = this.lst_price - (this.lst_price * (item.percent_price / 100));
+            } else if (item.compute_price === 'formula') {
+                var base_price = this.lst_price;
+                price = base_price * (1 + item.price_surcharge / 100) + item.price_discount;
+            }
+        }
+
+        return price;
+    },
+
+    /**
+     * Get display price (with or without taxes based on config)
+     */
+    get_display_price: function(pricelist, quantity) {
+        var self = this;
+        var price = this.get_price(pricelist, quantity);
+        
+        if (this.pos && this.pos.config && this.pos.config.iface_tax_included === 'total') {
+            var taxes = [];
+            if (this.taxes_id && this.taxes_id.length > 0) {
+                this.taxes_id.forEach(function(tax_id) {
+                    if (self.pos.taxes_by_id && self.pos.taxes_by_id[tax_id]) {
+                        taxes.push(self.pos.taxes_by_id[tax_id]);
+                    }
+                });
+            }
+            
+            if (taxes.length > 0 && this.pos.compute_all) {
+                var all_taxes = this.pos.compute_all(taxes, price, 1, this.pos.currency.rounding);
+                return all_taxes.total_included;
+            }
+        }
+        
+        return price;
+    }
 });
 
 return models;

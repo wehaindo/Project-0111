@@ -57,6 +57,10 @@ PosDB.include({
                 // Create object stores
                 if (!db.objectStoreNames.contains('products_cache')) {
                     const productsStore = db.createObjectStore('products_cache', { keyPath: 'id' });
+                    // Speed optimization indices
+                    productsStore.createIndex('barcode', 'barcode', { unique: false });
+                    productsStore.createIndex('default_code', 'default_code', { unique: false });
+                    productsStore.createIndex('display_name', 'display_name', { unique: false });
                     productsStore.createIndex('write_date', 'write_date', { unique: false });
                     productsStore.createIndex('pos_categ_id', 'pos_categ_id', { unique: false });
                 }
@@ -528,6 +532,315 @@ PosDB.include({
             const r = Math.random() * 16 | 0;
             const v = c === 'x' ? r : (r & 0x3 | 0x8);
             return v.toString(16);
+        });
+    },
+
+    // ============================================
+    // SPEED OPTIMIZATION METHODS
+    // ============================================
+
+    /**
+     * Load products by category (LAZY LOADING)
+     * Only loads products when category is accessed
+     */
+    load_products_by_category: async function(category_id, limit = 100) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['products_cache'], 'readonly');
+            const store = transaction.objectStore('products_cache');
+            const index = store.index('pos_categ_id');
+            const request = index.getAll(category_id, limit);
+
+            request.onsuccess = (event) => {
+                const products = event.target.result;
+                // Add to memory cache
+                if (products && products.length > 0) {
+                    this.add_products(products);
+                }
+                console.log(`✓ Loaded ${products.length} products for category ${category_id}`);
+                resolve(products);
+            };
+
+            request.onerror = (event) => {
+                console.error('Error loading products by category:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Preload only essential products (most recent, top sellers)
+     * Loads minimal set for fast POS startup
+     */
+    load_essential_products: async function(limit = 200) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['products_cache'], 'readonly');
+            const store = transaction.objectStore('products_cache');
+            
+            // Get most recently updated products (likely most relevant)
+            const index = store.index('write_date');
+            const request = index.openCursor(null, 'prev'); // Reverse order (newest first)
+
+            let products = [];
+            let count = 0;
+
+            request.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor && count < limit) {
+                    products.push(cursor.value);
+                    count++;
+                    cursor.continue();
+                } else {
+                    // Add to memory cache
+                    if (products.length > 0) {
+                        this.add_products(products);
+                    }
+                    console.log(`✓ Preloaded ${products.length} essential products`);
+                    resolve(products);
+                }
+            };
+
+            request.onerror = (event) => {
+                console.error('Error loading essential products:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Background load remaining products (non-blocking)
+     * Loads all products in batches without blocking UI
+     */
+    background_load_all_products: async function(batch_size = 500) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        const self = this;
+        let total_loaded = 0;
+
+        const loadBatch = async (skip_count) => {
+            return new Promise((resolve, reject) => {
+                const transaction = self.indexedDB.transaction(['products_cache'], 'readonly');
+                const store = transaction.objectStore('products_cache');
+                const request = store.openCursor();
+
+                let products = [];
+                let skipped = 0;
+
+                request.onsuccess = (event) => {
+                    const cursor = event.target.result;
+                    if (cursor) {
+                        // Skip already loaded products
+                        if (skipped < skip_count) {
+                            skipped++;
+                            cursor.continue();
+                            return;
+                        }
+
+                        // Collect batch
+                        if (products.length < batch_size) {
+                            const product = cursor.value;
+                            // Only add if not already in memory
+                            if (!self.product_by_id[product.id]) {
+                                products.push(product);
+                            }
+                            cursor.continue();
+                        } else {
+                            // Batch complete
+                            if (products.length > 0) {
+                                self.add_products(products);
+                            }
+                            resolve(products.length);
+                        }
+                    } else {
+                        // No more products
+                        if (products.length > 0) {
+                            self.add_products(products);
+                        }
+                        resolve(products.length);
+                    }
+                };
+
+                request.onerror = (event) => {
+                    console.error('Error in background load:', event);
+                    reject(event);
+                };
+            });
+        };
+
+        // Load in batches with delays (non-blocking)
+        let offset = 0;
+        let loaded = 0;
+        do {
+            loaded = await loadBatch(offset);
+            total_loaded += loaded;
+            if (loaded > 0) {
+                console.log(`📦 Background loaded ${total_loaded} products...`);
+            }
+            offset += batch_size;
+            
+            // Delay between batches to prevent blocking UI
+            if (loaded > 0) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        } while (loaded > 0);
+
+        console.log(`✓ Background loading complete: ${total_loaded} products`);
+        return total_loaded;
+    },
+
+    /**
+     * Smart search with IndexedDB cursor (faster than getAll)
+     * Uses cursor to avoid loading all products into memory
+     */
+    smart_search_products: async function(query, limit = 50) {
+        if (!query || typeof query !== 'string') {
+            return [];
+        }
+        
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['products_cache'], 'readonly');
+            const store = transaction.objectStore('products_cache');
+            const request = store.openCursor();
+
+            const search_query = query.toLowerCase();
+            let matched_products = [];
+
+            request.onsuccess = (event) => {
+                const cursor = event.target.result;
+                
+                if (cursor && matched_products.length < limit) {
+                    const product = cursor.value;
+                    
+                    // Match logic
+                    if ((product.name && product.name.toLowerCase().includes(search_query)) ||
+                        (product.display_name && product.display_name.toLowerCase().includes(search_query)) ||
+                        (product.barcode && product.barcode.toLowerCase().includes(search_query)) ||
+                        (product.default_code && product.default_code.toLowerCase().includes(search_query))) {
+                        matched_products.push(product);
+                    }
+                    
+                    cursor.continue();
+                } else {
+                    resolve(matched_products);
+                }
+            };
+
+            request.onerror = (event) => {
+                console.error('Error in smart search:', event);
+                resolve([]); // Resolve with empty array instead of reject
+            };
+        });
+    },
+
+    /**
+     * Fast get product by barcode (optimized with early exit)
+     * Uses cursor with early exit when product is found
+     */
+    fast_get_product_by_barcode: async function(barcode) {
+        if (!barcode || typeof barcode !== 'string') {
+            return null;
+        }
+        
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['products_cache'], 'readonly');
+            const store = transaction.objectStore('products_cache');
+            const index = store.index('barcode');
+            const request = index.get(barcode);
+
+            request.onsuccess = (event) => {
+                resolve(event.target.result || null);
+            };
+
+            request.onerror = (event) => {
+                console.error('Error getting product by barcode:', event);
+                resolve(null); // Resolve with null instead of reject
+            };
+        });
+    },
+
+    /**
+     * Batch save products with transaction (faster than individual saves)
+     * Uses transactions to save products in batches
+     */
+    batch_save_products: async function(products, batch_size = 1000) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        const total = products.length;
+        let saved = 0;
+
+        for (let i = 0; i < total; i += batch_size) {
+            const batch = products.slice(i, i + batch_size);
+            
+            await new Promise((resolve, reject) => {
+                const transaction = this.indexedDB.transaction(['products_cache'], 'readwrite');
+                const store = transaction.objectStore('products_cache');
+
+                batch.forEach(product => {
+                    store.put(product);
+                });
+
+                transaction.oncomplete = () => {
+                    saved += batch.length;
+                    console.log(`💾 Saved ${saved}/${total} products (${Math.round(saved/total*100)}%)`);
+                    resolve();
+                };
+
+                transaction.onerror = (event) => {
+                    console.error('Batch save error:', event);
+                    reject(event);
+                };
+            });
+
+            // Small delay between batches
+            if (i + batch_size < total) {
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+        }
+
+        console.log(`✓ Batch save complete: ${saved} products`);
+        return saved;
+    },
+
+    /**
+     * Get count of products in IndexedDB (for progress tracking)
+     */
+    get_products_count: async function() {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['products_cache'], 'readonly');
+            const store = transaction.objectStore('products_cache');
+            const request = store.count();
+
+            request.onsuccess = (event) => {
+                resolve(event.target.result);
+            };
+
+            request.onerror = (event) => {
+                console.error('Error getting products count:', event);
+                reject(event);
+            };
         });
     },
 
