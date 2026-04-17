@@ -121,13 +121,16 @@ class PosHybridSyncController(http.Controller):
             domain_partners = []
             
             if last_write_date:
-                domain_products.append(('write_date', '>', last_write_date))
                 domain_partners.append(('write_date', '>', last_write_date))
             
             if session.config_id.limit_categories and session.config_id.iface_available_categ_ids:
                 domain_products.append(('pos_categ_id', 'in', session.config_id.iface_available_categ_ids.ids))
             
-            product_count = request.env['product.product'].search_count(domain_products)
+            # Use custom method that checks both variant and template
+            product_count = request.env['product.product'].get_pos_delta_products_count(
+                last_write_date=last_write_date,
+                domain=domain_products
+            )
             partner_count = request.env['res.partner'].search_count(domain_partners)
             
             from odoo import fields
@@ -160,18 +163,23 @@ class PosHybridSyncController(http.Controller):
             list: Product records
         """
         try:
+            _logger.info(f'=== get_updates_products called ===')
+            _logger.info(f'Session ID: {session_id}')
+            _logger.info(f'Last write_date: {last_write_date}')
+            _logger.info(f'Limit: {limit}, Offset: {offset}')
+            
             session = request.env['pos.session'].browse(session_id)
             
             if not session.exists():
+                _logger.warning('Session does not exist!')
                 return []
             
             domain = [('available_in_pos', '=', True)]
             
-            if last_write_date:
-                domain.append(('write_date', '>', last_write_date))
-            
             if session.config_id.limit_categories and session.config_id.iface_available_categ_ids:
                 domain.append(('pos_categ_id', 'in', session.config_id.iface_available_categ_ids.ids))
+            
+            _logger.info(f'Base domain: {domain}')
             
             product_fields = [
                 'id', 'name', 'display_name', 'lst_price', 'standard_price',
@@ -180,15 +188,19 @@ class PosHybridSyncController(http.Controller):
                 'product_tmpl_id', 'tracking', 'write_date', 'available_in_pos'
             ]
             
-            products = request.env['product.product'].search_read(
-                domain,
+            # Use custom method that checks both variant and template write_date
+            products = request.env['product.product'].get_pos_delta_products(
+                last_write_date=last_write_date,
+                domain=domain,
                 fields=product_fields,
                 limit=limit,
-                offset=offset,
-                order='write_date desc'
+                offset=offset
             )
             
-            _logger.info(f'Fetched batch {offset}-{offset+len(products)} for session {session_id}')
+            _logger.info(f'Fetched batch {offset}-{offset+len(products)}, returned {len(products)} products for session {session_id}')
+            
+            if len(products) > 0:
+                _logger.info(f'First product: ID={products[0].get("id")}, name={products[0].get("name")}, price={products[0].get("lst_price")}')
             
             return products
             

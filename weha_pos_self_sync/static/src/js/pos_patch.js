@@ -25,7 +25,11 @@ models.PosModel = models.PosModel.extend({
             is_online: navigator.onLine,
             pending_count: 0,
             syncing: false,
-            last_sync: null
+            last_sync: null,
+            delta_syncing: false,
+            delta_total: 0,
+            delta_processed: 0,
+            delta_percent: 0
         };
     },
 
@@ -56,6 +60,8 @@ models.PosModel = models.PosModel.extend({
             this.sync_service.on('sync-completed', this, this.on_sync_completed);
             this.sync_service.on('sync-error', this, this.on_sync_error);
             this.sync_service.on('network-status-changed', this, this.on_network_status_changed);
+            this.sync_service.on('delta-sync-started', this, this.on_delta_sync_started);
+            this.sync_service.on('delta-sync-progress', this, this.on_delta_sync_progress);
             this.sync_service.on('delta-sync-completed', this, this.on_delta_sync_completed);
 
             // Start service
@@ -133,16 +139,45 @@ models.PosModel = models.PosModel.extend({
     },
 
     /**
+     * Delta sync started event
+     */
+    on_delta_sync_started: function(data) {
+        console.log('Delta sync started:', data);
+        this.sync_status.delta_syncing = true;
+        this.sync_status.delta_total = data.products || 0;
+        this.sync_status.delta_processed = 0;
+        this.trigger('sync-status-update', this.sync_status);
+    },
+
+    /**
+     * Delta sync progress event
+     */
+    on_delta_sync_progress: function(data) {
+        this.sync_status.delta_processed = data.processed || 0;
+        this.sync_status.delta_percent = data.percent || 0;
+        this.trigger('sync-status-update', this.sync_status);
+    },
+
+    /**
      * Delta sync completed event
      */
     on_delta_sync_completed: function(data) {
         console.log('Delta sync completed:', data);
+        this.sync_status.delta_syncing = false;
+        this.sync_status.delta_total = 0;
+        this.sync_status.delta_processed = 0;
+        this.sync_status.delta_percent = 0;
+        this.trigger('sync-status-update', this.sync_status);
         
-        if (data.products > 0 || data.partners > 0) {
-            Gui.showNotification(
-                `Updated: ${data.products} products, ${data.partners} partners`,
-                3000
-            );
+        if (data.products > 0) {
+            // Show notification using gui (Odoo 13 compatible)
+            if (this.gui) {
+                this.gui.show_popup('alert', {
+                    'title': 'Delta Sync Complete',
+                    'body': `${data.products} products updated`
+                });
+            }
+            console.log(`✓ Delta Sync Complete: ${data.products} products updated`);
         }
     },
 
@@ -350,6 +385,7 @@ Chrome.include({
             
             // Update on sync status changes
             this.pos.on('sync-status-changed', this, this.update_sync_status);
+            this.pos.on('sync-status-update', this, this.update_sync_status);
         }
     },
 
@@ -359,30 +395,57 @@ Chrome.include({
     render_sync_status_widget: function() {
         const self = this;
         
-        // Create widget container
+        console.log('Rendering sync status widget...');
+        
+        // Find the right header where status widgets go
+        let $target = this.$('.pos-rightheader .oe_status').first();
+        
+        if (!$target || $target.length === 0) {
+            console.warn('oe_status not found, trying pos-rightheader');
+            $target = this.$('.pos-rightheader');
+        }
+        
+        if (!$target || $target.length === 0) {
+            console.warn('Could not find navbar target');
+            return;
+        }
+        
+        console.log('Appending sync widget to navbar');
+        
+        // Create widget container with oe_status class to match other status widgets
         const $status_widget = $('<div>')
-            .addClass('pos-sync-status')
-            .appendTo(this.$('.pos-branding'));
+            .addClass('oe_status pos-sync-status')
+            .insertBefore($target);
 
         // Add sync indicator
         this.$sync_indicator = $('<span>')
-            .addClass('sync-indicator')
+            .addClass('sync-indicator online')
             .attr('title', 'Sync Status')
             .appendTo($status_widget);
 
-        // Add pending count
+        // Add pending count badge
         this.$pending_count = $('<span>')
             .addClass('pending-count')
             .hide()
             .appendTo($status_widget);
 
+        // Add delta sync badge
+        this.$delta_badge = $('<span>')
+            .addClass('delta-sync-badge')
+            .hide()
+            .appendTo($status_widget);
+
         // Add click handler
         $status_widget.click(function() {
-            self.show_sync_details();
+            if (self.show_sync_details) {
+                self.show_sync_details();
+            }
         });
 
         // Initial update
         this.update_sync_status(this.pos.sync_status);
+        
+        console.log('✓ Sync status widget rendered successfully');
     },
 
     /**
@@ -390,6 +453,8 @@ Chrome.include({
      */
     update_sync_status: function(status) {
         if (!this.$sync_indicator) return;
+
+        console.log('Updating sync status:', status);
 
         // Update indicator
         this.$sync_indicator
@@ -417,6 +482,17 @@ Chrome.include({
                 .show();
         } else {
             this.$pending_count.hide();
+        }
+
+        // Update delta sync badge
+        if (this.$delta_badge) {
+            if (status.delta_syncing && status.delta_total > 0) {
+                const progress_text = `${status.delta_percent || 0}%`;
+                console.log('Showing delta badge:', progress_text);
+                this.$delta_badge.text(progress_text).show();
+            } else {
+                this.$delta_badge.hide();
+            }
         }
     },
 

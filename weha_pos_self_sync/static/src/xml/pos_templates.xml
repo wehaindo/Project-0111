@@ -63,6 +63,26 @@
                 text-align: center;
             }
 
+            .delta-sync-badge {
+                background-color: #2196f3;
+                color: white;
+                padding: 2px 8px;
+                border-radius: 10px;
+                font-size: 10px;
+                font-weight: bold;
+                margin-left: 5px;
+                animation: pulse-blue 1.5s infinite;
+            }
+
+            @keyframes pulse-blue {
+                0%, 100% {
+                    opacity: 1;
+                }
+                50% {
+                    opacity: 0.6;
+                }
+            }
+
             .sync-details {
                 text-align: left;
                 min-width: 300px;
@@ -167,6 +187,9 @@
             <span class="sync-indicator" t-att-class="widget.status_class" t-att-title="widget.status_text"></span>
             <span class="pending-count" t-if="widget.pending_count > 0">
                 <t t-esc="widget.pending_count"/>
+            </span>
+            <span class="delta-sync-badge" t-if="widget.delta_syncing">
+                <t t-esc="widget.delta_progress"/>
             </span>
         </div>
     </t>

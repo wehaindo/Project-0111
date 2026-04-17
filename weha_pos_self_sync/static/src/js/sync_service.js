@@ -408,6 +408,12 @@ const SyncService = Class.extend({
 
             console.log(`Found ${total_products} products and ${total_partners} partners to sync`);
 
+            // Trigger delta sync started event
+            this.trigger('delta-sync-started', {
+                products: total_products,
+                partners: total_partners
+            });
+
             // Process partners immediately (usually small amount)
             if (total_partners > 0) {
                 const partners = await rpc.query({
@@ -429,12 +435,13 @@ const SyncService = Class.extend({
             // Process products in background batches (non-blocking)
             if (total_products > 0) {
                 console.log(`Starting background fetch of ${total_products} products...`);
-                this._fetch_and_process_delta_products_background(last_sync, total_products);
+                // Pass the new sync timestamp to save AFTER fetching completes
+                this._fetch_and_process_delta_products_background(last_sync, total_products, count_result.sync_timestamp);
+            } else {
+                // No products to fetch, save timestamp now
+                await this.db.set_sync_metadata('last_delta_sync', count_result.sync_timestamp);
+                console.log('Saved new sync timestamp:', count_result.sync_timestamp);
             }
-
-            // Save sync timestamp
-            await this.db.set_sync_metadata('last_delta_sync', count_result.sync_timestamp);
-            console.log('Saved new sync timestamp:', count_result.sync_timestamp);
 
             // Log sync
             await this.db.add_sync_log('delta_sync', 'Delta sync started', {
@@ -464,7 +471,7 @@ const SyncService = Class.extend({
      * Fetch and process delta products in background batches
      * Fetches from server in batches to avoid blocking
      */
-    _fetch_and_process_delta_products_background: function(last_sync, total_count) {
+    _fetch_and_process_delta_products_background: function(last_sync, total_count, new_sync_timestamp) {
         const self = this;
         
         console.log(`🔄 Starting background delta fetch for ${total_count} products...`);
@@ -473,6 +480,12 @@ const SyncService = Class.extend({
         setTimeout(function() {
             self._fetch_delta_products_in_batches(last_sync, total_count).then(function(processed) {
                 console.log(`✓ Background delta sync complete: ${processed} products`);
+                
+                // Save the new sync timestamp AFTER successful fetch
+                self.db.set_sync_metadata('last_delta_sync', new_sync_timestamp).then(function() {
+                    console.log('✓ Saved new sync timestamp:', new_sync_timestamp);
+                });
+                
                 self._refresh_product_screen();
                 
                 self.trigger('delta-sync-completed', {
@@ -481,6 +494,7 @@ const SyncService = Class.extend({
                 });
             }).catch(function(error) {
                 console.error('Background delta fetch error:', error);
+                console.error('❌ Not saving sync timestamp due to error');
             });
         }, 1000);
     },
@@ -492,9 +506,13 @@ const SyncService = Class.extend({
         const batch_size = 500;
         let processed = 0;
         
+        console.log(`📥 Fetching delta products updated after: ${last_sync}`);
+        
         try {
             // Fetch in batches
             for (let offset = 0; offset < total_count; offset += batch_size) {
+                console.log(`Requesting batch: offset=${offset}, limit=${batch_size}`);
+                
                 const products = await rpc.query({
                     route: '/pos/get_updates_products',
                     params: {
@@ -505,29 +523,77 @@ const SyncService = Class.extend({
                     }
                 });
 
+                console.log(`Server returned ${products ? products.length : 0} products`);
+                
                 if (products && products.length > 0) {
-                    // Convert to Product model instances first
-                    const product_models = this._convert_to_product_models(products);
+                    // Log first product details for debugging
+                    console.log('First product received:', {
+                        id: products[0].id,
+                        name: products[0].name,
+                        lst_price: products[0].lst_price,
+                        write_date: products[0].write_date
+                    });
                     
-                    // Save raw data to IndexedDB
-                    await this.db.save_products_to_indexeddb(products);
+                    // Create clean copy for IndexedDB (remove any functions)
+                    const clean_products = products.map(p => {
+                        return {
+                            id: p.id,
+                            name: p.name,
+                            display_name: p.display_name,
+                            lst_price: p.lst_price,
+                            standard_price: p.standard_price,
+                            categ_id: p.categ_id,
+                            pos_categ_id: p.pos_categ_id,
+                            taxes_id: p.taxes_id,
+                            barcode: p.barcode,
+                            default_code: p.default_code,
+                            to_weight: p.to_weight,
+                            uom_id: p.uom_id,
+                            description_sale: p.description_sale,
+                            description: p.description,
+                            product_tmpl_id: p.product_tmpl_id,
+                            tracking: p.tracking,
+                            write_date: p.write_date,
+                            available_in_pos: p.available_in_pos
+                        };
+                    });
+                    
+                    // Save clean data to IndexedDB
+                    await this.db.save_products_to_indexeddb(clean_products);
+                    console.log(`✓ Saved ${clean_products.length} products to IndexedDB`);
+                    
+                    // Convert to Product model instances for POS memory
+                    const product_models = this._convert_to_product_models(products);
+                    console.log(`✓ Converted ${product_models.length} products to models`);
                     
                     // Add Product instances to POS memory
                     this.pos.db.add_products(product_models);
+                    console.log(`✓ Added ${product_models.length} products to POS memory`);
                     
                     processed += products.length;
-                    console.log(`📦 Delta fetched: ${processed}/${total_count} (${Math.round(processed/total_count*100)}%)`);
+                    const progress_percent = Math.round(processed/total_count*100);
+                    console.log(`📦 Delta fetched: ${processed}/${total_count} (${progress_percent}%)`);
+                    
+                    // Trigger progress event
+                    this.trigger('delta-sync-progress', {
+                        processed: processed,
+                        total: total_count,
+                        percent: progress_percent
+                    });
+                } else {
+                    console.warn(`⚠️ No products returned from server for offset ${offset}`);
                 }
                 
                 // Small delay between batches
                 await new Promise(resolve => setTimeout(resolve, 100));
                 
                 // If less than batch size, we're done
-                if (products.length < batch_size) {
+                if (!products || products.length < batch_size) {
                     break;
                 }
             }
             
+            console.log(`✅ Fetch complete: ${processed} products processed`);
             return processed;
             
         } catch (error) {
