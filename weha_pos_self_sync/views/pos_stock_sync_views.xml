@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Stock Sync Metadata Tree View -->
+    <record id="view_pos_stock_sync_metadata_tree" model="ir.ui.view">
+        <field name="name">pos.stock.sync.metadata.tree</field>
+        <field name="model">pos.stock.sync.metadata</field>
+        <field name="arch" type="xml">
+            <tree string="Stock Sync Metadata">
+                <field name="pos_config_id"/>
+                <field name="location_id"/>
+                <field name="last_sync_date"/>
+                <field name="total_products_synced"/>
+                <field name="sync_status"/>
+            </tree>
+        </field>
+    </record>
+
+    <!-- Stock Sync Metadata Form View -->
+    <record id="view_pos_stock_sync_metadata_form" model="ir.ui.view">
+        <field name="name">pos.stock.sync.metadata.form</field>
+        <field name="model">pos.stock.sync.metadata</field>
+        <field name="arch" type="xml">
+            <form string="Stock Sync Metadata">
+                <header>
+                    <field name="sync_status" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="pos_config_id"/>
+                            <field name="location_id"/>
+                            <field name="last_sync_date"/>
+                        </group>
+                        <group>
+                            <field name="total_products_synced"/>
+                            <field name="last_product_count"/>
+                        </group>
+                    </group>
+                    <group string="Error Details" attrs="{'invisible': [('sync_status', '!=', 'failed')]}">
+                        <field name="error_message" nolabel="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Stock Sync Metadata Search View -->
+    <record id="view_pos_stock_sync_metadata_search" model="ir.ui.view">
+        <field name="name">pos.stock.sync.metadata.search</field>
+        <field name="model">pos.stock.sync.metadata</field>
+        <field name="arch" type="xml">
+            <search string="Stock Sync Metadata">
+                <field name="pos_config_id"/>
+                <field name="location_id"/>
+                <field name="sync_status"/>
+                <filter string="Failed" name="failed" domain="[('sync_status', '=', 'failed')]"/>
+                <filter string="Syncing" name="syncing" domain="[('sync_status', '=', 'syncing')]"/>
+                <filter string="Completed" name="completed" domain="[('sync_status', '=', 'completed')]"/>
+                <group expand="0" string="Group By">
+                    <filter string="POS Configuration" name="group_pos_config" context="{'group_by': 'pos_config_id'}"/>
+                    <filter string="Location" name="group_location" context="{'group_by': 'location_id'}"/>
+                    <filter string="Status" name="group_status" context="{'group_by': 'sync_status'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Stock Sync Metadata Menu -->
+    <record id="action_pos_stock_sync_metadata" model="ir.actions.act_window">
+        <field name="name">Stock Sync Metadata</field>
+        <field name="res_model">pos.stock.sync.metadata</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No stock sync metadata records yet
+            </p>
+            <p>
+                Stock sync metadata is automatically created when stock synchronization runs.
+            </p>
+        </field>
+    </record>
+
+    <menuitem id="menu_pos_stock_sync_metadata"
+              name="Stock Sync Metadata"
+              parent="point_of_sale.menu_point_rep"
+              action="action_pos_stock_sync_metadata"
+              sequence="50"/>
+
+</odoo>

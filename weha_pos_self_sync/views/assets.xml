@@ -17,6 +17,8 @@
                 <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/sync_service.js"/>
                 <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/models_extended.js"/>
                 <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/order_sync.js"/>
+                <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/manual_sync_widget.js"/>
+                <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/chrome_widgets.js"/>
                 <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/pos_patch.js"/>
             </xpath>
         </template>

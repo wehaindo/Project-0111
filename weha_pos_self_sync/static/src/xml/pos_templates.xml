@@ -256,4 +256,43 @@
         </div>
     </t>
 
+    <!-- Manual Sync Controls Widget -->
+    <t t-name="ManualSyncControls">
+        <div class="manual-sync-controls">
+            <button class="button btn-delta-sync" t-on-click="manual_delta_sync" 
+                    t-att-disabled="state.delta_syncing"
+                    t-att-class="state.delta_syncing ? 'syncing' : ''"
+                    title="Manually sync product/partner changes">
+                <i class="fa fa-refresh"></i> 
+                <span t-if="!state.delta_syncing">Delta Sync</span>
+                <span t-if="state.delta_syncing">Syncing...</span>
+            </button>
+            <button class="button btn-delete-sync" t-on-click="manual_delete_sync"
+                    t-att-disabled="state.delete_syncing"
+                    t-att-class="state.delete_syncing ? 'syncing' : ''"
+                    title="Manually sync deleted products/partners">
+                <i class="fa fa-trash"></i> 
+                <span t-if="!state.delete_syncing">Delete Sync</span>
+                <span t-if="state.delete_syncing">Syncing...</span>
+            </button>
+            <button class="button btn-stock-sync" t-on-click="manual_stock_sync"
+                    t-att-disabled="state.stock_syncing"
+                    t-att-class="state.stock_syncing ? 'syncing' : ''"
+                    title="Manually sync stock quantities">
+                <i class="fa fa-cubes"></i> 
+                <span t-if="!state.stock_syncing">Stock Sync</span>
+                <span t-if="state.stock_syncing">Syncing...</span>
+            </button>
+        </div>
+    </t>
+
+    <!-- Chrome Extension - Add Manual Sync Controls to Header -->
+    <t t-name="Chrome" t-inherit="point_of_sale.Chrome" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('pos-branding')]" position="after">
+            <t t-if="showManualSyncControls">
+                <ManualSyncControls />
+            </t>
+        </xpath>
+    </t>
+
 </templates>

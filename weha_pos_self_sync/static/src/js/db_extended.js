@@ -13,12 +13,12 @@ const PosDB = require('point_of_sale.DB');
 
 PosDB.include({
     name: 'pos_hybrid_sync_db',
-    version: 3,  // Increment version for pricelist items
+    version: 4,  // Increment version for stock quantities
 
     init: function(options) {
         this._super(options);
         this.db_name = 'pos_hybrid_sync_db';
-        this.db_version = 3;  // Increment version
+        this.db_version = 4;  // Increment version
         this.indexedDB = null;
         this.sync_logs = [];
         this.orders_queue = [];
@@ -92,6 +92,12 @@ PosDB.include({
                     pricelistStore.createIndex('product_id', 'product_id', { unique: false });
                     pricelistStore.createIndex('product_tmpl_id', 'product_tmpl_id', { unique: false });
                     pricelistStore.createIndex('write_date', 'write_date', { unique: false });
+                }
+
+                if (!db.objectStoreNames.contains('stock_quantities')) {
+                    const stockStore = db.createObjectStore('stock_quantities', { keyPath: 'product_id' });
+                    stockStore.createIndex('location_id', 'location_id', { unique: false });
+                    stockStore.createIndex('last_update', 'last_update', { unique: false });
                 }
 
                 console.log('IndexedDB schema created/upgraded');
@@ -1061,6 +1067,173 @@ PosDB.include({
 
             transaction.onerror = (event) => {
                 console.error('Error clearing cache:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Save stock quantities to IndexedDB
+     */
+    save_stock_to_indexeddb: async function(stock_data) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['stock_quantities'], 'readwrite');
+            const store = transaction.objectStore('stock_quantities');
+
+            let count = 0;
+            stock_data.forEach(stock => {
+                const record = {
+                    product_id: stock.product_id,
+                    qty_available: stock.qty_available || 0,
+                    virtual_available: stock.virtual_available || 0,
+                    location_id: stock.location_id,
+                    last_update: stock.write_date || new Date().toISOString()
+                };
+                store.put(record);
+                count++;
+            });
+
+            transaction.oncomplete = () => {
+                console.log(`💾 Saved ${count} stock quantities to IndexedDB`);
+                resolve(count);
+            };
+
+            transaction.onerror = (event) => {
+                console.error('Error saving stock to IndexedDB:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Get stock quantity for a specific product
+     */
+    get_stock_from_indexeddb: async function(product_id) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['stock_quantities'], 'readonly');
+            const store = transaction.objectStore('stock_quantities');
+            const request = store.get(product_id);
+
+            request.onsuccess = () => {
+                resolve(request.result || null);
+            };
+
+            request.onerror = (event) => {
+                console.error('Error getting stock from IndexedDB:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Get all stock quantities from IndexedDB
+     */
+    get_all_stock_from_indexeddb: async function() {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['stock_quantities'], 'readonly');
+            const store = transaction.objectStore('stock_quantities');
+            const request = store.getAll();
+
+            request.onsuccess = () => {
+                console.log(`📦 Loaded ${request.result.length} stock quantities from IndexedDB`);
+                resolve(request.result);
+            };
+
+            request.onerror = (event) => {
+                console.error('Error loading all stock from IndexedDB:', event);
+                reject(event);
+            };
+        });
+    },
+
+    /**
+     * Update stock quantity locally (e.g., after sale)
+     */
+    update_stock_quantity: async function(product_id, qty_change, location_id) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise(async (resolve, reject) => {
+            try {
+                // Get current stock
+                const current_stock = await this.get_stock_from_indexeddb(product_id);
+                
+                if (!current_stock) {
+                    console.warn(`No stock record for product ${product_id}, creating new one`);
+                    await this.save_stock_to_indexeddb([{
+                        product_id: product_id,
+                        qty_available: qty_change,
+                        virtual_available: qty_change,
+                        location_id: location_id
+                    }]);
+                    resolve(qty_change);
+                    return;
+                }
+
+                // Update quantities
+                const transaction = this.indexedDB.transaction(['stock_quantities'], 'readwrite');
+                const store = transaction.objectStore('stock_quantities');
+                
+                current_stock.qty_available += qty_change;
+                current_stock.virtual_available += qty_change;
+                current_stock.last_update = new Date().toISOString();
+                
+                store.put(current_stock);
+
+                transaction.oncomplete = () => {
+                    console.log(`📦 Updated stock for product ${product_id}: ${qty_change > 0 ? '+' : ''}${qty_change} (new: ${current_stock.qty_available})`);
+                    resolve(current_stock.qty_available);
+                };
+
+                transaction.onerror = (event) => {
+                    console.error('Error updating stock:', event);
+                    reject(event);
+                };
+            } catch (error) {
+                console.error('Error in update_stock_quantity:', error);
+                reject(error);
+            }
+        });
+    },
+
+    /**
+     * Delete stock quantities from IndexedDB
+     */
+    delete_stock_from_indexeddb: async function(product_ids) {
+        if (!this.indexedDB) {
+            await this.init_indexed_db();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.indexedDB.transaction(['stock_quantities'], 'readwrite');
+            const store = transaction.objectStore('stock_quantities');
+
+            let count = 0;
+            product_ids.forEach(product_id => {
+                store.delete(product_id);
+                count++;
+            });
+
+            transaction.oncomplete = () => {
+                console.log(`🗑️ Deleted ${count} stock quantities from IndexedDB`);
+                resolve(count);
+            };
+
+            transaction.onerror = (event) => {
+                console.error('Error deleting stock from IndexedDB:', event);
                 reject(event);
             };
         });

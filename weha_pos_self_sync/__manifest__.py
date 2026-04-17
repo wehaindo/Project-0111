@@ -39,6 +39,7 @@ Technical:
         'views/assets.xml',
         'views/pos_config_views.xml',
         'views/pos_deleted_record_views.xml',
+        'views/pos_stock_sync_views.xml',
     ],
     'qweb': [
         'static/src/xml/pos_templates.xml',
