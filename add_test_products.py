@@ -9,7 +9,7 @@ import time
 import random
 
 # Odoo connection parameters - UPDATE THESE!
-URL = 'http://localhost:8069'
+URL = 'https://sarinah.server1601.weha-id.com'
 DB = 'odoo13_pos'  # Change this to your actual database name
 USERNAME = 'admin'
 PASSWORD = 'pelang1'  # Change this to your actual password
