@@ -1,3 +1,4 @@
 # Ignore Sarinah folder
 Sarinah/
-logs/*
+# Ignore logs folder
+logs/

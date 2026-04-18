@@ -1,0 +1,584 @@
+.weha_product_list {
+    width: 100%;
+    font-size: 15px;
+    border-collapse: collapse;
+}
+.weha_product_list thead tr {
+    line-height: 45px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+.weha_product_list thead th {
+    font-weight: 600;
+    text-align: left;
+    padding: 12px 10px;
+}
+.weha_product_list tr.product_line {
+    background: #fff;
+    transition: background 0.2s ease;
+    border-bottom: 1px solid #f0f0f0;
+}
+.weha_product_list tr.product_line:hover {
+    background: #f8f9ff;
+}
+.weha_product_list tr td {
+    padding: 12px 10px;
+    vertical-align: middle;
+}
+
+/* Stock Status Badges */
+.stock-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 5px;
+}
+.stock-badge.in-stock  { background: #d4edda; color: #155724; }
+.stock-badge.low-stock { background: #fff3cd; color: #856404; }
+.stock-badge.out-of-stock { background: #f8d7da; color: #721c24; }
+
+/* Price */
+.weha_product_list .product-price {
+    font-weight: 600;
+    color: #667eea;
+    font-size: 15px;
+}
+
+/* Add button */
+.set-on-order {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+.set-on-order:hover {
+    opacity: 0.85;
+}
+
+/* ---- Mirror clientlist-screen window/subwindow overrides for productlist-screen ---- */
+.pos .productlist-screen .window,
+.pos .productlist-screen .full-content .subwindow {
+    display: block;
+}
+.pos .productlist-screen .full-content .subwindow-container {
+    display: block;
+    height: 100%;
+}
+.pos .productlist-screen .full-content .subwindow.collapsed,
+.pos .productlist-screen .full-content .subwindow-container.collapsed {
+    height: auto;
+}
+
+/* Pagination bar pinned at bottom of full-content */
+.productlist-screen .pagination-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    padding: 0 15px;
+    border-top: 1px solid #e0e0e0;
+    background: #fafafa;
+    z-index: 2;
+}
+
+/* Window leaves room for pagination bar */
+.productlist-screen .full-content .window {
+    position: absolute !important;
+    top: 0;
+    bottom: 52px;
+    left: 0;
+    right: 0;
+}
+
+/* ---- Back button override (purple instead of POS default gray) ---- */
+.productlist-screen .top-content .button.back {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+    border-color: #5a4d9e !important;
+    font-size: 16px;
+    line-height: 30px;
+}
+.productlist-screen .top-content .button.back:hover {
+    opacity: 0.9;
+}
+
+/* ---- Search box fills top-content bar after the back button ---- */
+.productlist-screen .productlist-searchbox {
+    position: absolute;
+    left: 140px;
+    right: 8px;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+}
+.productlist-screen .productlist-searchbox .fa-search {
+    position: absolute;
+    left: 14px;
+    color: #aaa;
+    pointer-events: none;
+    font-size: 14px;
+}
+.productlist-screen .productlist-searchbox input {
+    width: 100%;
+    padding: 9px 15px 9px 38px;
+    border-radius: 25px;
+    border: 2px solid #e0e0e0;
+    font-size: 14px;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+    background: white;
+}
+.productlist-screen .productlist-searchbox input:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.15);
+}
+
+/* ---- Pagination buttons ---- */
+.pagination-bar .btn-page-prev,
+.pagination-bar .btn-page-next {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+.pagination-bar .btn-page-prev:hover:not(:disabled),
+.pagination-bar .btn-page-next:hover:not(:disabled) {
+    opacity: 0.85;
+}
+.pagination-bar .btn-page-prev:disabled,
+.pagination-bar .btn-page-next:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+.pagination-bar .pagination-info {
+    font-size: 14px;
+    color: #555;
+    font-weight: 500;
+    min-width: 180px;
+    text-align: center;
+}
+
+/* ---- Product card list (mobile) ---- */
+.product-card-list { display: none; }
+
+@media only screen and (max-width: 1024px) {
+    .product-list  { display: none; }
+    .product-card-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 15px;
+        padding: 15px;
+    }
+}
+
+.product-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 2px solid transparent;
+    transition: all 0.2s ease;
+}
+.product-card:hover {
+    border-color: #667eea;
+    box-shadow: 0 6px 16px rgba(102,126,234,0.2);
+}
+.card-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 12px;
+    font-weight: 600;
+    font-size: 15px;
+    text-align: center;
+}
+.card-body {
+    padding: 12px;
+    font-size: 13px;
+    flex: 1;
+}
+.card-body div { margin-bottom: 6px; display: flex; justify-content: space-between; }
+.card-footer {
+    padding: 10px;
+    text-align: center;
+    border-top: 1px solid #f0f0f0;
+    background: #fafafa;
+}
+
+.weha_product_list thead tr {
+    line-height: 45px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+.weha_product_list thead th {
+    font-weight: 600;
+    text-align: left;
+    padding: 12px 10px;
+}
+.weha_product_list tr.product_line {
+    background: #fff;
+    transition: all 0.2s ease;
+    border-bottom: 1px solid #f0f0f0;
+}
+.weha_product_list tr.product_line:hover {
+    background: #f8f9ff;
+    transform: scale(1.01);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+}
+.weha_product_list tr td {
+    padding: 12px 10px;
+    vertical-align: middle;
+}
+
+/* Stock Status Badges */
+.stock-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 5px;
+}
+.stock-badge.in-stock {
+    background: #d4edda;
+    color: #155724;
+}
+.stock-badge.low-stock {
+    background: #fff3cd;
+    color: #856404;
+}
+.stock-badge.out-of-stock {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* Price styling */
+.product-price {
+    font-weight: 600;
+    color: #667eea;
+    font-size: 16px;
+}
+
+.product-card-list {
+    display: none; /* hide cards on desktop */
+}
+
+@media only screen and (max-width: 1024px){
+    .product-list {
+        display: none; /* hide table on mobile */
+    }
+    .product-card-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 15px;
+        padding: 15px;
+    }
+}
+
+.product-card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    border: 2px solid transparent;
+}
+
+.product-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.25);
+    border-color: #667eea;
+}
+
+.card-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px;
+    font-weight: 600;
+    font-size: 16px;
+    text-align: center;
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.card-name {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.card-body {
+    padding: 15px;
+    font-size: 14px;
+    color: #333;
+    flex: 1;
+}
+
+.card-body div {
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.card-body strong {
+    color: #666;
+    font-weight: 600;
+}
+
+.card-footer {
+    padding: 12px;
+    text-align: center;
+    border-top: 1px solid #f0f0f0;
+    background: #fafafa;
+}
+
+.set-on-order {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.set-on-order:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+}
+
+.set-on-order:active {
+    transform: translateY(0);
+}
+
+/* Search box styling */
+.custom_searchbox {
+    position: relative;
+    display: inline-block;
+}
+
+.custom_searchbox input {
+    margin: 15px;
+    border-radius: 25px;
+    padding: 12px 20px;
+    padding-left: 45px;
+    border: 2px solid #e0e0e0;
+    width: 400px;
+    font-size: 15px;
+    transition: all 0.3s ease;
+}
+
+.custom_searchbox input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.custom_searchbox .fa-search {
+    position: absolute;
+    left: 30px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #999;
+    pointer-events: none;
+}
+
+/* Screen layout */
+.productlist-screen .screen-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.productlist-screen .productlist-full-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+}
+
+.productlist-screen .productlist-scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+    min-height: 0;
+    -webkit-overflow-scrolling: touch;
+}
+
+.productlist-screen .pagination-bar {
+    flex-shrink: 0;
+}
+
+/* Top bar */
+.productlist-screen .productlist-topbar {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    flex-shrink: 0;
+    width: 100%;
+    padding: 8px 10px;
+    background: #fff;
+    border-bottom: 1px solid #e0e0e0;
+    box-sizing: border-box;
+    gap: 10px;
+    position: relative;
+    z-index: 1;
+}
+
+/* Back button */
+.productlist-screen .productlist-back-btn {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white !important;
+    padding: 9px 18px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s ease;
+}
+
+.productlist-screen .productlist-back-btn:hover {
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    transform: translateY(-1px);
+}
+
+/* Search box */
+.productlist-screen .productlist-searchbox {
+    flex: 1 1 auto;
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.productlist-screen .productlist-search-icon {
+    position: absolute;
+    left: 14px;
+    color: #aaa;
+    pointer-events: none;
+    font-size: 14px;
+}
+
+.productlist-screen .productlist-search-input {
+    width: 100%;
+    padding: 9px 15px 9px 38px;
+    border-radius: 25px;
+    border: 2px solid #e0e0e0;
+    font-size: 14px;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+
+.productlist-screen .productlist-search-input:focus {
+    border-color: #667eea;
+}
+
+/* Back button styling */
+.productlist-screen .button.back {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white !important;
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin: 10px 15px;
+    user-select: none;
+}
+
+.productlist-screen .button.back:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+/* Pagination */
+.pagination-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    padding: 12px 15px;
+    border-top: 1px solid #e0e0e0;
+    background: #fafafa;
+    flex-shrink: 0;
+}
+
+.pagination-bar .btn-page-prev,
+.pagination-bar .btn-page-next {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.pagination-bar .btn-page-prev:hover:not(:disabled),
+.pagination-bar .btn-page-next:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(102, 126, 234, 0.4);
+}
+
+.pagination-bar .btn-page-prev:disabled,
+.pagination-bar .btn-page-next:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.pagination-bar .pagination-info {
+    font-size: 14px;
+    color: #555;
+    font-weight: 500;
+    min-width: 180px;
+    text-align: center;
+}
