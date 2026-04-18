@@ -6,6 +6,7 @@
         <template id="assets_css" inherit_id="point_of_sale.assets">
             <xpath expr="." position="inside">
                 <link rel="stylesheet" href="/weha_pos_self_sync/static/src/css/pos_sync.css"/>
+                <link rel="stylesheet" href="/weha_pos_self_sync/static/src/css/screen_product_list.css"/>
             </xpath>
         </template>
 
@@ -20,6 +21,7 @@
                 <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/manual_sync_widget.js"/>
                 <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/chrome_widgets.js"/>
                 <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/pos_patch.js"/>
+                <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/screen_product_list.js"/>
             </xpath>
         </template>
 

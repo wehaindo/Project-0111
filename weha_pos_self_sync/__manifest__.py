@@ -43,6 +43,7 @@ Technical:
     ],
     'qweb': [
         'static/src/xml/pos_templates.xml',
+        'static/src/xml/screen_product_list.xml',
     ],
     'installable': True,
     'auto_install': False,

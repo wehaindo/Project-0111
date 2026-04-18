@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <t t-name="ProductListButton">
+        <span class="control-button" style="min-width: 10px !important;">
+            <div style="display: inline-block; vertical-align: middle; align-items: center; height: 33px; line-height: 30px;">
+                <i class="fa fa-history" aria-hidden="true"></i>
+            </div>
+            Product List
+        </span>
+    </t>
+
+    <t t-name="ProductListScreenWidget">
+        <div class="productlist-screen screen">
+            <div class="screen-content">
+                <section class="top-content">
+                    <span class="button back">
+                        <i class="fa fa-angle-double-left"></i>
+                        Back
+                    </span>
+                    <span class="productlist-searchbox">
+                        <i class="fa fa-search"></i>
+                        <input placeholder="Search by name, SKU, or barcode..." />
+                    </span>
+                </section>
+                <section class="full-content">
+                    <div class="window">
+                        <section class="subwindow">
+                            <div class="subwindow-container">
+                                <div class="subwindow-container-fix scrollable-y touch-scrollable">
+                                    <div class="product-list">
+                                        <table class="weha_product_list">
+                                            <thead>
+                                                <tr>
+                                                    <th style="width: 40%;">Product Name</th>
+                                                    <th style="width: 12%;">SKU</th>
+                                                    <th style="width: 13%;">Barcode</th>
+                                                    <th style="width: 12%;">Price</th>
+                                                    <th style="width: 13%;">Stock</th>
+                                                    <th style="width: 10%;"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="product-list-contents"></tbody>
+                                        </table>
+                                    </div>
+                                    <div class="product-card-list"></div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                    <div class="pagination-bar">
+                        <button class="btn-page-prev">&#8249; Prev</button>
+                        <span class="pagination-info">Page 1 of 1 (0 products)</span>
+                        <button class="btn-page-next">Next &#8250;</button>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="ProductListLine">
+        <tr t-att-data-id="product.id" class="product_line" style="padding-left: 10px;">
+            <td>
+                <t t-esc="product.display_name" />
+            </td>
+            <td>
+                <t t-esc="product.default_code" />
+            </td>
+            <td>
+                <t t-esc="product.barcode" />
+            </td>
+            <td class="product-price">
+                <t t-esc="widget.format_currency(product.display_price)"/>
+            </td>
+            <td>
+                <t t-esc="product.qty_available" />
+                <t t-if="product.qty_available &gt; 10">
+                    <span class="stock-badge in-stock">✓ In Stock</span>
+                </t>
+                <t t-elif="product.qty_available &gt; 0">
+                    <span class="stock-badge low-stock">⚠ Low Stock</span>
+                </t>
+                <t t-else="">
+                    <span class="stock-badge out-of-stock">✕ Out of Stock</span>
+                </t>
+            </td>
+            <td>
+                <button class="button set-on-order" t-att-data-id="product.id">
+                    <i class="fa fa-plus"></i> Add
+                </button>
+            </td>
+        </tr>
+    </t>
+
+    <t t-name="ProductCardLine">
+        <div t-att-data-id="product.id" class="product-card">
+            <div class="card-header">
+                <div class="card-name"><t t-esc="product.display_name" /></div>
+            </div>
+            <div class="card-body">
+                <div><strong>SKU:</strong> <span><t t-esc="product.default_code" /></span></div>
+                <div><strong>Barcode:</strong> <span><t t-esc="product.barcode" /></span></div>
+                <div><strong>Price:</strong> <span class="product-price"><t t-esc="widget.format_currency(product.display_price)"/></span></div>
+                <div>
+                    <strong>Stock:</strong> 
+                    <span>
+                        <t t-esc="product.qty_available" />
+                        <t t-if="product.qty_available &gt; 10">
+                            <span class="stock-badge in-stock">✓</span>
+                        </t>
+                        <t t-elif="product.qty_available &gt; 0">
+                            <span class="stock-badge low-stock">⚠</span>
+                        </t>
+                        <t t-else="">
+                            <span class="stock-badge out-of-stock">✕</span>
+                        </t>
+                    </span>
+                </div>
+            </div>
+            <div class="card-footer">
+                <button class="button set-on-order" t-att-data-id="product.id">
+                    <i class="fa fa-plus"></i> Add to Order
+                </button>
+            </div>
+        </div>
+        
+    </t>
+</templates>
