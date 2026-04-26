@@ -141,6 +141,114 @@
                 background: #757575;
             }
 
+            /* ── js_manual_sync icon cursor ──────────────────── */
+            .js_manual_sync .oe_icon { cursor: pointer; }
+
+            /* ── Popup overlay ───────────────────────────────── */
+            .sync-popup-overlay {
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0,0,0,0.45);
+                z-index: 9990;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .sync-popup {
+                background: #fff;
+                border-radius: 10px;
+                width: 320px;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+                overflow: hidden;
+                animation: popup-in 0.18s ease;
+            }
+            @keyframes popup-in {
+                from { transform: scale(0.9); opacity: 0; }
+                to   { transform: scale(1);   opacity: 1; }
+            }
+
+            .sync-popup-header {
+                background: #00796b;
+                color: #fff;
+                padding: 14px 16px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                font-size: 15px;
+                font-weight: 600;
+            }
+            .sync-popup-title i { margin-right: 8px; }
+            .sync-popup-close {
+                cursor: pointer;
+                font-size: 18px;
+                opacity: 0.8;
+                line-height: 1;
+            }
+            .sync-popup-close:hover { opacity: 1; }
+
+            .sync-popup-body {
+                padding: 10px 12px 14px;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+
+            .sync-popup-divider {
+                height: 1px;
+                background: #eee;
+                margin: 4px 0;
+            }
+
+            .sync-popup-btn {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                width: 100%;
+                padding: 10px 14px;
+                background: #f5f5f5;
+                border: 1px solid #e0e0e0;
+                border-radius: 7px;
+                cursor: pointer;
+                text-align: left;
+                transition: background 0.15s;
+            }
+            .sync-popup-btn:hover:not(:disabled) { background: #e8f5e9; border-color: #a5d6a7; }
+            .sync-popup-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+            .sync-popup-btn i {
+                font-size: 18px;
+                width: 22px;
+                text-align: center;
+                color: #00796b;
+            }
+            .sync-popup-btn.btn-sync-all  i { color: #1565c0; }
+            .sync-popup-btn.btn-delete-sync i { color: #c62828; }
+            .sync-popup-btn.btn-stock-sync  i { color: #e65100; }
+
+            .sync-popup-btn-label {
+                font-weight: 600;
+                font-size: 14px;
+                color: #212121;
+                display: block;
+                line-height: 1.2;
+            }
+            .sync-popup-btn-desc {
+                font-size: 11px;
+                color: #757575;
+                display: block;
+            }
+
+            .sync-popup-status {
+                padding: 8px 16px 12px;
+                font-size: 13px;
+                color: #555;
+                border-top: 1px solid #eee;
+                text-align: center;
+            }
+            .sync-popup-status.success { color: #2e7d32; }
+            .sync-popup-status.error   { color: #c62828; }
+
+            /* ── Offline indicator banner ──────────────────────── */
             /* Offline indicator banner */
             .offline-banner {
                 position: fixed;
@@ -256,43 +364,22 @@
         </div>
     </t>
 
-    <!-- Manual Sync Controls Widget -->
+    <!-- Manual Sync Controls Widget — single navbar icon + popup -->
     <t t-name="ManualSyncControls">
-        <div class="manual-sync-controls">
-            <button class="button btn-delta-sync" t-on-click="manual_delta_sync" 
-                    t-att-disabled="state.delta_syncing"
-                    t-att-class="state.delta_syncing ? 'syncing' : ''"
-                    title="Manually sync product/partner changes">
-                <i class="fa fa-refresh"></i> 
-                <span t-if="!state.delta_syncing">Delta Sync</span>
-                <span t-if="state.delta_syncing">Syncing...</span>
-            </button>
-            <button class="button btn-delete-sync" t-on-click="manual_delete_sync"
-                    t-att-disabled="state.delete_syncing"
-                    t-att-class="state.delete_syncing ? 'syncing' : ''"
-                    title="Manually sync deleted products/partners">
-                <i class="fa fa-trash"></i> 
-                <span t-if="!state.delete_syncing">Delete Sync</span>
-                <span t-if="state.delete_syncing">Syncing...</span>
-            </button>
-            <button class="button btn-stock-sync" t-on-click="manual_stock_sync"
-                    t-att-disabled="state.stock_syncing"
-                    t-att-class="state.stock_syncing ? 'syncing' : ''"
-                    title="Manually sync stock quantities">
-                <i class="fa fa-cubes"></i> 
-                <span t-if="!state.stock_syncing">Stock Sync</span>
-                <span t-if="state.stock_syncing">Syncing...</span>
-            </button>
+        <div class="oe_status js_manual_sync">
+            <div class="oe_icon js_idle" title="Sync Options">
+                <i class="fa fa-fw fa-refresh" role="img" aria-label="Sync Options" title="Sync Options"></i>
+            </div>
+            <div class="oe_icon js_syncing oe_hidden">
+                <i class="fa fa-fw fa-spin fa-spinner" role="img" aria-label="Syncing" title="Syncing…"></i>
+            </div>
+            <div class="oe_icon oe_green js_done oe_hidden">
+                <i class="fa fa-fw fa-check" role="img" aria-label="Sync Done" title="Sync Done"></i>
+            </div>
+            <div class="oe_icon oe_red js_error oe_hidden">
+                <i class="fa fa-fw fa-warning" role="img" aria-label="Sync Error" title="Sync Error"></i>
+            </div>
         </div>
-    </t>
-
-    <!-- Chrome Extension - Add Manual Sync Controls to Header -->
-    <t t-name="Chrome" t-inherit="point_of_sale.Chrome" t-inherit-mode="extension">
-        <xpath expr="//div[hasclass('pos-branding')]" position="after">
-            <t t-if="showManualSyncControls">
-                <ManualSyncControls />
-            </t>
-        </xpath>
     </t>
 
 </templates>

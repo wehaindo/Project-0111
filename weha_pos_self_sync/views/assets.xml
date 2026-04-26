@@ -14,6 +14,7 @@
         <template id="assets" inherit_id="point_of_sale.assets">
             <xpath expr="." position="inside">
                 <!-- Load in correct order -->
+                <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/pos_ws_client.js"/>
                 <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/db_extended.js"/>
                 <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/sync_service.js"/>
                 <script type="text/javascript" src="/weha_pos_self_sync/static/src/js/models_extended.js"/>

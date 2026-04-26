@@ -3,10 +3,41 @@ odoo.define('weha_pos_self_sync.models_extended', function (require) {
 
 const models = require('point_of_sale.models');
 const rpc = require('web.rpc');
+const PosWsClient = require('weha_pos_self_sync.pos_ws_client');
 
 /**
  * Extend POS models for lazy loading and performance optimization
  */
+
+// ── Expose extra pos.config fields to the POS frontend ───────────────────────
+// In Odoo 13, pos.config is NOT in the standard models array — it is loaded
+// via a dedicated backend call and merged into this.config before the normal
+// models loop runs.  The only reliable way to pull extra fields is with a
+// models.push entry that queries pos.config directly and merges results into
+// self.config inside the `loaded` callback.
+models.PosModel.prototype.models.push({
+    model:  'pos.config',
+    fields: [
+        'enable_ws_monitor', 'ws_server_url', 'ws_pos_id', 'ws_heartbeat_interval',
+        'enable_hybrid_sync', 'sync_method', 'sync_interval', 'max_sync_retries',
+        'initial_product_limit', 'enable_auto_save', 'enable_delta_sync',
+        'enable_stock_sync', 'show_stock_quantity', 'stock_sync_interval',
+        'low_stock_threshold', 'prevent_negative_stock',
+    ],
+    domain: function(self) {
+        return [['id', '=', self.pos_session.config_id[0]]];
+    },
+    loaded: function(self, configs) {
+        if (configs && configs.length) {
+            // Merge our custom fields into the already-populated self.config
+            _.extend(self.config, configs[0]);
+            console.log('[weha_pos_self_sync] pos.config extra fields loaded:',
+                'enable_ws_monitor=', self.config.enable_ws_monitor,
+                'ws_server_url=', self.config.ws_server_url,
+                'enable_hybrid_sync=', self.config.enable_hybrid_sync);
+        }
+    },
+});
 
 // Store original load_server_data
 const _super_posmodel = models.PosModel.prototype;
@@ -20,6 +51,16 @@ models.PosModel = models.PosModel.extend({
      * - hybrid: Load initial batch + on-demand
      */
     async load_server_data() {
+        const self = this;
+        try {
+            return await self._load_server_data_inner();
+        } finally {
+            // Always start WS client after data load, if enabled in config
+            self._init_ws_client();
+        }
+    },
+
+    async _load_server_data_inner() {
         const self = this;
         
         // FIRST: Load config and other data (but not products yet)
@@ -132,6 +173,19 @@ models.PosModel = models.PosModel.extend({
         }
 
         return true;
+    },
+
+    _init_ws_client: function() {
+        // Initialize WS client only when enabled in POS config, regardless of sync mode
+        if (!PosWsClient) return;
+        if (!this.config || !this.config.enable_ws_monitor) {
+            console.log('[weha_pos_self_sync] WS Monitor disabled (enable_ws_monitor=false)');
+            return;
+        }
+        if (this.ws_client) return; // already running
+        console.log('[weha_pos_self_sync] _init_ws_client() — starting WS client');
+        PosWsClient.init(this);
+        this.ws_client = PosWsClient;
     },
     
     /**

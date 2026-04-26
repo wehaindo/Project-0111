@@ -59,10 +59,77 @@ services:
       retries: 3
       start_period: 40s
 
+  # ── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: pos_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - odoo-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── WebSocket Server ─────────────────────────────────────────────────────
+  websocket-server:
+    build:
+      context: ./websocket-server
+      dockerfile: Dockerfile
+    container_name: pos_ws_server
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PORT=8080
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - odoo-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('net').createConnection(8080,'localhost').on('connect',function(){this.destroy();process.exit(0)}).on('error',function(){process.exit(1)})\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Command Center (Next.js) ─────────────────────────────────────────────
+  command-center:
+    build:
+      context: ./command-center
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_WS_URL: ws://localhost:8080
+    container_name: pos_command_center
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - websocket-server
+    networks:
+      - odoo-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
 volumes:
   odoo-web-data:
     driver: local
   odoo-db-data:
+    driver: local
+  redis-data:
     driver: local
 
 networks:

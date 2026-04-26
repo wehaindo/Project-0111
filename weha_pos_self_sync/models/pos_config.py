@@ -88,7 +88,36 @@ class PosConfig(models.Model):
         help='Location to track stock from (uses POS picking type location if not set)',
         domain=[('usage', '=', 'internal')]
     )
-    
+
+    # ── WebSocket Monitor Settings ──────────────────────────────────────────
+    enable_ws_monitor = fields.Boolean(
+        string='Enable WS Monitor',
+        default=False,
+        help='Connect this POS terminal to the real-time WebSocket monitoring server'
+    )
+    ws_server_url = fields.Char(
+        string='WebSocket Server URL',
+        default='ws://localhost:8080',
+        help='URL of the WebSocket monitoring server, e.g. ws://192.168.1.10:8080'
+    )
+    ws_pos_id = fields.Char(
+        string='Terminal ID',
+        help='Unique identifier for this POS terminal in the monitoring dashboard '
+             '(auto-filled with POS name if left blank)'
+    )
+    ws_heartbeat_interval = fields.Integer(
+        string='Heartbeat Interval (seconds)',
+        default=30,
+        help='How often this terminal sends a heartbeat to the monitoring server (10–120 s)'
+    )
+
+    @api.constrains('ws_heartbeat_interval')
+    def _check_ws_heartbeat_interval(self):
+        for record in self:
+            if record.enable_ws_monitor and not (10 <= record.ws_heartbeat_interval <= 120):
+                from odoo.exceptions import ValidationError
+                raise ValidationError('Heartbeat interval must be between 10 and 120 seconds')
+
     @api.depends('sync_method')
     def _compute_lazy_load(self):
         """Backward compatibility for lazy_load_products field"""
