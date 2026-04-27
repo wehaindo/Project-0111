@@ -13,7 +13,7 @@ services:
     volumes:
       - odoo-db-data:/var/lib/postgresql/data/pgdata
     ports:
-      - "5432:5432"
+      - "25432:5432"
     networks:
       - odoo-network
     restart: unless-stopped
@@ -30,8 +30,8 @@ services:
     depends_on:
       - db
     ports:
-      - "8069:8069"
-      - "8072:8072"  # Longpolling port
+      - "28069:28069"
+      - "28072:28072"  # Longpolling port
     environment:
       - HOST=db
       - USER=odoo
