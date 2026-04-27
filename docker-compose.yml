@@ -28,8 +28,8 @@ services:
     depends_on:
       - db
     ports:
-      - "28069:28069"
-      - "28072:28072"  # Longpolling port
+      - "28069:8069"
+      - "28072:8072"  # Longpolling port
     environment:
       - HOST=db
       - USER=odoo
