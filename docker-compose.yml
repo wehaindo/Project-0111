@@ -4,7 +4,7 @@ services:
     image: postgres:13
     container_name: odoo13_postgres
     environment:
-      - POSTGRES_DB=postgres
+      - POSTGRES_DB=odoo
       - POSTGRES_USER=odoo
       - POSTGRES_PASSWORD=odoo
       - PGDATA=/var/lib/postgresql/data/pgdata
