@@ -26,7 +26,8 @@ services:
     image: odoo:13.0
     container_name: odoo13_app
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "28069:8069"
       - "28072:8072"  # Longpolling port
@@ -46,16 +47,13 @@ services:
     networks:
       - odoo-network
     restart: unless-stopped
-    command: >
-      --
-      --log-level=info
-      --workers=0
+    command: odoo --log-level=info --workers=0
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8069/web/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8069/web/health || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 60s
 
 volumes:
   odoo-web-data:
